@@ -15,6 +15,7 @@ from urllib.request import Request as URLRequest, urlopen
 from urllib.error import HTTPError, URLError
 import hmac
 import smtplib
+import click
 from email.message import EmailMessage
 
 from flask import (
@@ -4808,6 +4809,40 @@ def init_db_command():
     """Apply additive compatibility migrations and create initial local defaults."""
     init_db()
     print("Database initialization complete.")
+
+
+@app.cli.command("configure-basic-billing")
+@click.option("--monthly-price-id", envvar="BASIC_MONTHLY_PRICE_ID", required=True)
+@click.option("--annual-price-id", envvar="BASIC_ANNUAL_PRICE_ID", required=True)
+def configure_basic_billing(monthly_price_id, annual_price_id):
+    """Validate the approved Stripe prices before configuring a fresh Basic plan."""
+    plan = SubscriptionPlan.query.filter_by(name="Basic", custom_pricing=False).first()
+    if not plan:
+        raise click.ClickException("Initialize the database and Basic plan first.")
+    expected_mode = app.config.get("APP_ENV") == "production"
+    for price_id, interval, amount in ((monthly_price_id, "month", 39900),
+                                       (annual_price_id, "year", 454860)):
+        if not re.fullmatch(r"price_[A-Za-z0-9]+", price_id):
+            raise click.ClickException("Invalid Stripe Price ID; no plan settings changed.")
+        try:
+            price = stripe_request("GET", "prices/" + price_id)
+        except Exception as exc:
+            raise click.ClickException("Stripe prices could not be verified; no plan settings changed.") from exc
+        recurring = price.get("recurring") or {}
+        if (price.get("id") != price_id or price.get("active") is not True
+                or price.get("livemode") is not expected_mode or price.get("currency") != "usd"
+                or price.get("unit_amount") != amount or recurring.get("interval") != interval
+                or recurring.get("interval_count") != 1):
+            raise click.ClickException("Stripe price differs from approved Basic billing; no plan settings changed.")
+    if ((plan.stripe_monthly_price_id and plan.stripe_monthly_price_id != monthly_price_id)
+            or (plan.stripe_annual_price_id and plan.stripe_annual_price_id != annual_price_id)):
+        raise click.ClickException("Existing Basic prices differ; review owner settings before changing them.")
+    plan.stripe_monthly_price_id = monthly_price_id
+    plan.stripe_annual_price_id = annual_price_id
+    plan.monthly_amount_cents = 39900
+    plan.annual_amount_cents = 454860
+    db.session.commit()
+    print("Approved Basic monthly and annual prices verified and configured.")
 
 
 if __name__ == "__main__":

@@ -58,6 +58,42 @@ class LaunchReadinessTests(unittest.TestCase):
             self.assertTrue(portal.stripe_api_key_is_valid(prefix + 'fixture', 'testing'))
             self.assertFalse(portal.stripe_api_key_is_valid(prefix + 'fixture', 'production'))
 
+    def test_billing_bootstrap_validates_prices_before_saving_and_is_idempotent(self):
+        plan = portal.SubscriptionPlan(name='Basic', custom_pricing=False)
+        portal.db.session.add(plan)
+        portal.db.session.commit()
+        def approved_price(method, path):
+            monthly = path == 'prices/price_monthly'
+            return {'id': path.split('/')[-1], 'active': True, 'livemode': False,
+                    'currency': 'usd', 'unit_amount': 39900 if monthly else 454860,
+                    'recurring': {'interval': 'month' if monthly else 'year', 'interval_count': 1}}
+        runner = portal.app.test_cli_runner()
+        args = ['configure-basic-billing', '--monthly-price-id', 'price_monthly',
+                '--annual-price-id', 'price_annual']
+        with patch.object(portal, 'stripe_request', side_effect=approved_price):
+            self.assertEqual(runner.invoke(args=args).exit_code, 0)
+            self.assertEqual(runner.invoke(args=args).exit_code, 0)
+        portal.db.session.refresh(plan)
+        self.assertEqual(plan.annual_amount_cents, 454860)
+        self.assertEqual(plan.stripe_annual_price_id, 'price_annual')
+
+    def test_billing_bootstrap_rejects_a_price_mismatch_without_partial_changes(self):
+        plan = portal.SubscriptionPlan(name='Basic', custom_pricing=False)
+        portal.db.session.add(plan)
+        portal.db.session.commit()
+        def wrong_annual_price(method, path):
+            monthly = path == 'prices/price_monthly'
+            return {'id': path.split('/')[-1], 'active': True, 'livemode': False,
+                    'currency': 'usd', 'unit_amount': 39900 if monthly else 1,
+                    'recurring': {'interval': 'month' if monthly else 'year', 'interval_count': 1}}
+        with patch.object(portal, 'stripe_request', side_effect=wrong_annual_price):
+            result = portal.app.test_cli_runner().invoke(args=['configure-basic-billing',
+                '--monthly-price-id', 'price_monthly', '--annual-price-id', 'price_annual'])
+        self.assertNotEqual(result.exit_code, 0)
+        portal.db.session.refresh(plan)
+        self.assertFalse(plan.stripe_monthly_price_id)
+        self.assertFalse(plan.stripe_annual_price_id)
+
     def test_current_item_periods_and_legacy_periods(self):
         self.assertEqual(portal.stripe_period_timestamp({'items': {'data': [
             {'current_period_end': 1800000000}]}}), 1800000000)
