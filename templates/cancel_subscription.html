@@ -1,0 +1,14 @@
+{% extends 'base.html' %}{% block title %}Cancel subscription{% endblock %}{% block content %}
+<section class="login-card saas-card billing-action-card">
+  <p class="eyebrow">SUBSCRIPTION RENEWAL</p><h1>Cancel renewal?</h1>
+  <p class="muted">This schedules the subscription to end at the end of its current paid billing period.</p>
+  <dl class="billing-review-list">
+    <div><dt>Current plan</dt><dd>{{ plan.name if plan else 'Custom workspace' }}</dd></div>
+    <div><dt>Price</dt><dd>{% if subscription.custom_amount_cents is not none %}${{ '%.2f'|format(subscription.custom_amount_cents / 100) }}{% elif plan %}${{ '%.2f'|format((plan.annual_amount_cents if subscription.billing_interval == 'annual' else plan.monthly_amount_cents) / 100) if (plan.annual_amount_cents if subscription.billing_interval == 'annual' else plan.monthly_amount_cents) is not none else 'Contact Construct IV' }}{% else %}Contact Construct IV{% endif %} / {{ subscription.billing_interval or 'month' }}</dd></div>
+    <div><dt>Current billing period</dt><dd>{{ subscription.current_period_start.strftime('%b %d, %Y') if subscription.current_period_start else 'Not available' }}{% if subscription.current_period_end %} – {{ subscription.current_period_end.strftime('%b %d, %Y') }}{% endif %}</dd></div>
+    <div><dt>Access ends</dt><dd>{{ subscription.current_period_end.strftime('%b %d, %Y') if subscription.current_period_end else 'Stripe will confirm the paid-through date' }}</dd></div>
+  </dl>
+  <div class="billing-policy-note"><strong>No automatic refund</strong><p>Canceling renewal does not refund the current payment. No prorated refund is issued automatically. Annual customers can separately request an early cancellation and refund review.</p><strong>Your data is preserved</strong><p>Cancellation does not delete uploaded footage or project records. Uploads and paid access follow the current paid-through period.</p></div>
+  <div class="billing-action-buttons"><a class="button secondary" href="{{ url_for('dashboard') }}">Keep subscription</a><form method="post"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="button primary">Confirm cancellation</button></form></div>
+</section>
+{% endblock %}

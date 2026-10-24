@@ -100,7 +100,7 @@ def validate_production_configuration(app_env, database_url, secret_key, *, stor
     if not smtp_configured:
         raise RuntimeError("Production requires SMTP configuration for verification and account recovery email.")
     stripe_key = os.environ.get("STRIPE_SECRET_KEY", "") if stripe_key is None else stripe_key
-    if not stripe_key.startswith("sk_live_"):
+    if not stripe_key.startswith(("sk_live_", "rk_live_")):
         raise RuntimeError("Production requires live-mode Stripe credentials; test keys are not accepted.")
     if stripe_webhook_configured is None:
         stripe_webhook_configured = bool(os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip())
@@ -154,13 +154,15 @@ if app_env == "production":
     # restores the client address for rate limiting and HTTPS for request URLs.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxy_count, x_proto=1)
 ENTERPRISE_INQUIRY_EMAIL = os.environ.get("ENTERPRISE_INQUIRY_EMAIL", "").strip()
+STRIPE_API_VERSION = "2026-09-30.endive"
 
 
 def stripe_api_key_is_valid(key=None, environment=None):
     """Allow Stripe test keys outside production and live keys only in production."""
     key = os.environ.get("STRIPE_SECRET_KEY", "") if key is None else key
     environment = app.config.get("APP_ENV", "development") if environment is None else environment
-    expected_prefix = "sk_live_" if str(environment).strip().lower() == "production" else "sk_test_"
+    expected_prefix = (("sk_live_", "rk_live_") if str(environment).strip().lower() == "production"
+                       else ("sk_test_", "rk_test_"))
     return bool(key and key.startswith(expected_prefix))
 
 
@@ -838,6 +840,24 @@ def prune_rate_limit_events_if_due():
         app.logger.exception("Expired rate-limit event cleanup failed")
 
 
+def subscription_retrieval_deadline(subscription):
+    """The approved 90-day download window starts when paid access ends."""
+    if not subscription:
+        return None
+    ended_at = None
+    if subscription.status in {"canceled", "unpaid"} or subscription.cancel_at_period_end:
+        ended_at = subscription.current_period_end
+    elif subscription.status == "past_due":
+        try:
+            grace_days = max(0, min(30, int(os.environ.get("BILLING_GRACE_DAYS", "7"))))
+        except ValueError:
+            grace_days = 7
+        ended_at = (subscription.past_due_since or subscription.updated_at) + timedelta(days=grace_days)
+    if not ended_at or ended_at > now_utc():
+        return None
+    return ended_at + timedelta(days=90)
+
+
 @app.before_request
 def enforce_workspace_billing_window():
     if not has_request_context() or not current_user.is_authenticated or request.endpoint == "logout":
@@ -859,7 +879,7 @@ def enforce_workspace_billing_window():
                     .order_by(CompanySubscription.id.desc()).first())
     expired = company.status != "active"
     billing_expired = False
-    if subscription and subscription.status == "canceled":
+    if subscription and subscription.status in {"canceled", "unpaid"}:
         billing_expired = not subscription.current_period_end or subscription.current_period_end <= now_utc()
         expired = expired or billing_expired
     if subscription and subscription.cancel_at_period_end:
@@ -875,6 +895,19 @@ def enforce_workspace_billing_window():
         billing_expired = grace_started + timedelta(days=grace_days) <= now_utc()
         expired = expired or billing_expired
     if expired:
+        deadline = subscription_retrieval_deadline(subscription)
+        if (company.status != "suspended" and membership.role == "company_admin"
+                and deadline and now_utc() < deadline):
+            company.status = "billing_suspended"
+            db.session.commit()
+            g.retrieval_only = True
+            # Only the verified account holder may retrieve existing objects.
+            # Public viewers, employees, uploads and administrative edits stay blocked.
+            if request.method not in {"GET", "HEAD"}:
+                abort(403, "This workspace is restricted to file retrieval.")
+            if request.endpoint in {"retrieve_workspace", "protected_file", "static"}:
+                return
+            return redirect(url_for("retrieve_workspace"))
         # Keep owner suspension separate so a later successful invoice cannot
         # silently undo an administrative access decision.
         if company.status != "suspended":
@@ -2022,10 +2055,13 @@ def subscription_checkout(subscription_id):
         "metadata[subscription_id]": str(subscription.id),
         "subscription_data[metadata][subscription_id]": str(subscription.id),
         "customer_email": membership.user.email or membership.user.username,
+        "integration_identifier": "constructiv_checkout_" + "".join(
+            chr(97 + byte % 26) for byte in hashlib.sha256(
+                f"constructiv-checkout-{subscription.id}".encode()).digest()[:8]),
     }
     data = urlencode(fields).encode()
     req = URLRequest("https://api.stripe.com/v1/checkout/sessions", data=data,
-                     headers={"Authorization": f"Bearer {stripe_key}",
+                     headers={"Authorization": f"Bearer {stripe_key}", "Stripe-Version": STRIPE_API_VERSION,
                               "Content-Type": "application/x-www-form-urlencoded",
                               "Idempotency-Key": f"constructiv-checkout-subscription-{subscription.id}"})
     try:
@@ -2062,7 +2098,8 @@ def billing_portal():
     fields = {"customer": subscription.stripe_customer_id,
               "return_url": absolute_app_url("dashboard")}
     req = URLRequest("https://api.stripe.com/v1/billing_portal/sessions", data=urlencode(fields).encode(),
-                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/x-www-form-urlencoded"})
+                     headers={"Authorization": f"Bearer {key}", "Stripe-Version": STRIPE_API_VERSION,
+                              "Content-Type": "application/x-www-form-urlencoded"})
     try:
         with urlopen(req, timeout=20) as response:
             portal = json.loads(response.read())
@@ -2081,7 +2118,7 @@ def stripe_request(method, path, fields=None, *, idempotency_key=None):
         raise RuntimeError("Stripe is not configured for this environment.")
     fields = fields or {}
     url = "https://api.stripe.com/v1/" + path.lstrip("/")
-    headers = {"Authorization": f"Bearer {key}"}
+    headers = {"Authorization": f"Bearer {key}", "Stripe-Version": STRIPE_API_VERSION}
     if method.upper() == "GET":
         if fields:
             url += "?" + urlencode(fields)
@@ -2107,9 +2144,26 @@ def billing_subscription_for_current_company():
             .order_by(CompanySubscription.id.desc()).first())
 
 
+def stripe_period_timestamp(subscription_obj, field="current_period_end"):
+    """Support legacy subscription periods and current single-item Billing payloads.
+
+    Construct IV sells one recurring item per company. Do not guess a paid-through
+    date for an unexpected multi-item subscription with different billing periods.
+    """
+    timestamp = subscription_obj.get(field)
+    if type(timestamp) is int and timestamp > 0:
+        return timestamp
+    items = (subscription_obj.get("items") or {}).get("data") or []
+    if len(items) == 1 and isinstance(items[0], dict):
+        timestamp = items[0].get(field)
+        if type(timestamp) is int and timestamp > 0:
+            return timestamp
+    return None
+
+
 def stripe_period_date(subscription_obj):
-    timestamp = subscription_obj.get("current_period_end")
-    return datetime.utcfromtimestamp(timestamp) if isinstance(timestamp, int) and timestamp > 0 else None
+    timestamp = stripe_period_timestamp(subscription_obj)
+    return datetime.utcfromtimestamp(timestamp) if timestamp else None
 
 
 @app.route("/account/billing/cancel", methods=["GET", "POST"])
@@ -2436,6 +2490,10 @@ def stripe_webhook():
         if StripeEvent.query.filter_by(event_id=event_id).first():
             return jsonify({"received": True, "duplicate": True})
         raise
+    # Delayed payment methods must fulfill only after their signed success event.
+    # Preserve the original event type in StripeEvent for audit and deduplication.
+    if event_type == "checkout.session.async_payment_succeeded":
+        event_type = "checkout.session.completed"
     obj = (event.get("data") or {}).get("object") or {}
     if event_type in {"refund.created", "refund.updated"}:
         refund_item = AnnualRefundRequest.query.filter_by(stripe_refund_id=obj.get("id", "")).first()
@@ -2483,10 +2541,10 @@ def stripe_webhook():
                 else:
                     app.logger.warning("Stripe subscription %s uses an unmapped Price ID %s",
                                        obj.get("id", "unknown"), price_id)
-            period_end = obj.get("current_period_end")
+            period_end = stripe_period_timestamp(obj)
             if isinstance(period_end, int) and period_end > 0:
                 record.current_period_end = datetime.utcfromtimestamp(period_end)
-            period_start = obj.get("current_period_start")
+            period_start = stripe_period_timestamp(obj, "current_period_start")
             if isinstance(period_start, int) and period_start > 0:
                 record.current_period_start = datetime.utcfromtimestamp(period_start)
             record.cancel_at_period_end = bool(obj.get("cancel_at_period_end", False))
@@ -2534,9 +2592,12 @@ def stripe_webhook():
             elif event_type == "customer.subscription.deleted" or stripe_status in {"canceled", "unpaid", "incomplete_expired"}:
                 record.status = stripe_status
                 record.past_due_since = None
-                period_end = obj.get("current_period_end")
-                paid_through = datetime.utcfromtimestamp(period_end) if isinstance(period_end, int) and period_end > datetime.utcnow().timestamp() else None
-                record.current_period_end = paid_through
+                period_end = stripe_period_timestamp(obj)
+                paid_through = datetime.utcfromtimestamp(period_end) if type(period_end) is int and period_end > int(time.time()) else None
+                record.current_period_end = (datetime.utcfromtimestamp(period_end)
+                                             if type(period_end) is int and period_end > 0
+                                             else record.current_period_end)
+                # Preserve the actual past period end as a retention/retrieval anchor.
                 # Keep billing expiry distinct from an explicit owner
                 # suspension so a later verified resubscription can restore
                 # access without undoing an owner's security decision.
@@ -3073,6 +3134,32 @@ def logout():
     audit("logout", "user", current_user.id, "User signed out")
     logout_user()
     return redirect(url_for("login"))
+
+
+@app.get("/account/retrieve")
+@login_required
+def retrieve_workspace():
+    membership = current_membership()
+    if not membership or membership.role != "company_admin" or membership.company.status == "suspended":
+        abort(403)
+    subscription = (CompanySubscription.query.filter_by(company_id=membership.company_id)
+                    .order_by(CompanySubscription.id.desc()).first())
+    deadline = subscription_retrieval_deadline(subscription)
+    if not deadline or now_utc() >= deadline:
+        abort(403)
+    files = []
+    for model, label in ((Flight, "Drone footage"), (ProjectFile, "Document"),
+                         (ProjectSiteMap, "Site map"), (ProjectPhotoReference, "Reference photo"),
+                         (ProjectPinnedPhoto, "Site photo")):
+        for item in model.query.all():
+            files.append({"category": label, "project": item.project,
+                          "name": (getattr(item, "original_filename", None)
+                                   or getattr(item, "title", None)
+                                   or getattr(item, "name", None) or item.filename),
+                          "filename": item.filename})
+    files.sort(key=lambda item: (item["project"] or "", item["category"], item["name"]))
+    return render_template("retrieve_workspace.html", files=files, deadline=deadline,
+                           company=membership.company)
 
 
 @app.route("/dashboard")

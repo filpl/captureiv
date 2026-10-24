@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Review billing · Construct IV{% endblock %}
+{% block content %}
+<section class="login-card saas-card checkout-review">
+  <p class="eyebrow">SECURE CHECKOUT REVIEW</p>
+  <h1>Review your subscription</h1>
+  <p class="muted">Check the plan and renewal details before continuing. Payment details are entered on Stripe's secure checkout page.</p>
+
+  <div class="checkout-plan-summary">
+    <div><span>Plan</span><strong>{{ plan.name if plan else 'Subscription' }}</strong></div>
+    <div><span>Billing</span><strong>{{ 'Annual' if subscription.billing_interval == 'annual' else 'Monthly' }}</strong></div>
+    {% if plan and plan.name|lower == 'basic' %}
+    <div><span>Price</span><strong>{% if subscription.billing_interval == 'annual' and plan.annual_amount_cents %}${{ '%.2f'|format(plan.annual_amount_cents / 100) }} per year{% else %}$399.00 per month{% endif %}</strong></div>
+    <div><span>Included</span><strong>1 active project · 2 accounts · 1 TB storage</strong></div>
+    {% elif subscription.custom_amount_cents %}
+    <div><span>Price</span><strong>${{ '%.2f'|format(subscription.custom_amount_cents / 100) }} per {{ subscription.billing_interval }}</strong></div>
+    {% endif %}
+  </div>
+
+  <div class="checkout-terms">
+    <h2>Billing and cancellation</h2>
+    <ul>
+      <li>Your subscription renews {{ 'annually' if subscription.billing_interval == 'annual' else 'monthly' }} at the price shown above until cancelled.</li>
+      <li>Cancellation stops the next renewal. Access continues through the paid billing period end; cancellation does not delete workspace data.</li>
+      <li>Monthly payments are not automatically refunded, except where required by law or an approved exception. Annual refund requests receive manual review, with no guaranteed refund.</li>
+      <li>After paid access ends, company administrators have a 90-day read-only window to download existing files. Uploads, edits and client sharing are unavailable. Download your own copies before the deadline; retention beyond 90 days is not guaranteed.</li>
+      <li>There are no automatic storage overage charges or storage add-ons.</li>
+    </ul>
+    <p class="muted small">Basic annual billing is $4,548.60 per company per year, a 5% discount against twelve monthly payments. Enterprise pricing and scope require a separate agreement. Cancellation does not trigger automatic file deletion.</p>
+  </div>
+
+  {% if checkout_ready %}
+  <form method="post" class="checkout-accept-form">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label class="checkout-accept"><input type="checkbox" name="accept_billing_terms" value="yes" required><span>I have reviewed and agree to the billing and cancellation terms above.</span></label>
+    <button type="submit" class="button primary full">Continue to secure payment →</button>
+  </form>
+  {% else %}
+  <p class="flash info">{{ checkout_message }}</p>
+  <a class="button full" href="{{ url_for('register') }}">Return to registration</a>
+  {% endif %}
+</section>
+{% endblock %}

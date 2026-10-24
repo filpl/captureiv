@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}Retrieve your files{% endblock %}
+{% block content %}
+<section class="panel">
+  <p class="eyebrow">READ-ONLY FILE RETRIEVAL</p>
+  <h1>{{ company.name }} — download your files</h1>
+  <p>Your paid workspace access has ended. Your company administrator can download existing files until <strong>{{ deadline.strftime('%B %d, %Y at %H:%M UTC') }}</strong>, 90 days after access ended.</p>
+  <p>Uploads, project edits and client sharing are unavailable. Download and keep your own copies before this deadline. Automatic deletion is not enabled; retention beyond this window is not guaranteed.</p>
+  {% if files %}
+  <table>
+    <thead><tr><th>Project</th><th>Type</th><th>File</th><th>Download</th></tr></thead>
+    <tbody>{% for file in files %}
+      <tr><td>{{ file.project }}</td><td>{{ file.category }}</td><td>{{ file.name }}</td>
+      <td><a class="button" href="{{ url_for('protected_file', filename=file.filename, download=1) }}">Download</a></td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<p>There are no stored files in this workspace.</p>{% endif %}
+</section>
+{% endblock %}

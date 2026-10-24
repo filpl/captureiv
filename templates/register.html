@@ -1,0 +1,24 @@
+{% extends 'base.html' %}{% block title %}Create a company account{% endblock %}{% block content %}
+<section class="login-card saas-card">
+  <div class="brand large"><span class="brand-mark">C</span><span>CONSTRUCT IV<small>CONSTRUCTION INTELLIGENCE</small></span></div>
+  <p class="eyebrow">CREATE YOUR WORKSPACE</p><h1>Get started</h1>
+  <p class="muted">Create your company workspace. It stays pending until email verification and billing are confirmed.</p>
+  {% if pending_checkout %}<p class="flash success">You have a saved pending registration. <a href="{{ url_for('subscription_checkout',subscription_id=pending_checkout.id) }}">Resume checkout</a></p>{% endif %}
+  {% set basic=plans|selectattr('name','equalto','Basic')|first %}
+  <form method="post" class="form-stack">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label>Company name<input name="company_name" autocomplete="organization" maxlength="180" required></label>
+    <div class="saas-name-row"><label>First name<input name="first_name" autocomplete="given-name" maxlength="80" required></label><label>Last name<input name="last_name" autocomplete="family-name" maxlength="80" required></label></div>
+    <label>Work email<input type="email" name="email" autocomplete="email" maxlength="254" required></label>
+    <label>Plan<select name="plan_id" required>{% for plan in plans %}<option value="{{ plan.id }}" {% if requested_plan == plan.name|lower %}selected{% endif %}>{{ plan.name }} — {% if plan.name == 'Basic' %}$399 / month · 1 project · 2 accounts · 1 TB{% else %}{{ plan.description }}{% endif %}</option>{% endfor %}</select></label>
+    <fieldset class="saas-interval"><legend>Billing interval</legend>
+      <label><input type="radio" name="billing_interval" value="monthly" checked> Monthly · $399</label>
+      <label><input type="radio" name="billing_interval" value="annual" {% if not basic or not basic.annual_amount_cents or not basic.stripe_annual_price_id %}disabled{% endif %}> Annual{% if not basic or not basic.annual_amount_cents or not basic.stripe_annual_price_id %} · not yet available{% else %} · ${{ '%.2f'|format(basic.annual_amount_cents / 100) }}{% endif %}</label>
+    </fieldset>
+    <label>Password<input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
+    <label>Confirm password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>
+    <button class="button primary full" {% if not plans %}disabled{% endif %}>Create pending account <span>→</span></button>
+  </form>
+  <p class="fineprint">Basic includes one active project, two authenticated company accounts, and 1 TB total storage. No storage add-ons are offered. <a href="{{ config.get('MARKETING_SITE_URL', 'http://127.0.0.1:5173/') }}">Back to Construct IV</a></p>
+</section>
+{% endblock %}

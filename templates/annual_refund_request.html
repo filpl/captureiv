@@ -1,0 +1,25 @@
+{% extends 'base.html' %}{% block title %}Annual refund review{% endblock %}{% block content %}
+<section class="login-card saas-card billing-action-card">
+  <p class="eyebrow">ANNUAL SUBSCRIPTION</p><h1>Request a refund review</h1>
+  <p class="muted">This sends a request to the Platform Owner. It does not cancel your subscription, suspend access, or issue a refund.</p>
+  <dl class="billing-review-list">
+    <div><dt>Company</dt><dd>{{ company_name }}</dd></div>
+    <div><dt>Billing administrator</dt><dd>{{ current_user.name }}</dd></div>
+    <div><dt>Contact email</dt><dd>{{ current_user.email or current_user.username }}</dd></div>
+    <div><dt>Stripe subscription</dt><dd>{{ subscription.stripe_subscription_id or 'Not linked' }}</dd></div>
+    <div><dt>Original annual payment</dt><dd>{% if subscription.custom_amount_cents is not none %}${{ '%.2f'|format(subscription.custom_amount_cents / 100) }}{% elif subscription.plan and subscription.plan.annual_amount_cents is not none %}${{ '%.2f'|format(subscription.plan.annual_amount_cents / 100) }}{% else %}Verified from Stripe during review{% endif %}</dd></div>
+    <div><dt>Subscription dates</dt><dd>{{ subscription.current_period_start.strftime('%b %d, %Y') if subscription.current_period_start else 'Not available' }} – {{ subscription.current_period_end.strftime('%b %d, %Y') if subscription.current_period_end else 'Not available' }}</dd></div>
+  </dl>
+  {% if refund_request %}
+    <p class="flash success">You have a request under review ({{ refund_request.status }}). Submitted {{ refund_request.requested_at.strftime('%b %d, %Y') }}.</p>
+  {% else %}
+    <form method="post" class="form-stack">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <label>Reason<select name="reason" required><option value="">Choose a reason</option>{% for reason in reasons %}<option value="{{ reason }}">{{ reason }}</option>{% endfor %}</select></label>
+      <label>Additional comments<textarea name="comments" rows="5" maxlength="4000" required></textarea></label>
+      <p class="fineprint">Refunds are not guaranteed. A Platform Owner reviews each request under the published agreement and applicable law. No automatic prorated refund is calculated.</p>
+      <div class="billing-action-buttons"><a class="button secondary" href="{{ url_for('dashboard') }}">Back to billing</a><button class="button primary">Submit for review</button></div>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}
