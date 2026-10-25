@@ -4804,6 +4804,38 @@ def init_db():
         apply_basic_plan_defaults()
 
 
+@app.cli.command("reset-platform-owner")
+def reset_platform_owner_command():
+    """Recover the existing owner only after an explicit hosting-console request."""
+    if os.environ.get("OWNER_CREDENTIAL_RESET", "") != "1":
+        print("Owner recovery not requested; no account changed.")
+        return
+    username = os.environ.get("ADMIN_USERNAME", "").strip().lower()
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{2,79}", username):
+        raise click.ClickException("Choose an owner username of 3-80 letters, numbers, dots, underscores or hyphens.")
+    if len(password) < 12 or password.isspace():
+        raise click.ClickException("Enter a new owner password of at least 12 characters in the hosting console.")
+    owners = User.query.filter_by(platform_owner=True).all()
+    if len(owners) != 1:
+        raise click.ClickException("Recovery requires exactly one existing platform owner; no accounts changed.")
+    owner = owners[0]
+    collision = User.query.filter(or_(User.username == username, User.email == username), User.id != owner.id).first()
+    if collision:
+        raise click.ClickException("That username belongs to another user; no accounts changed.")
+    if owner.username == username and owner.check_password(password) and owner.active and owner.is_admin:
+        print("Owner credentials already match; no account changed.")
+        return
+    owner.username = username
+    owner.set_password(password)
+    owner.active = True
+    owner.is_admin = True
+    EmailActionToken.query.filter_by(user_id=owner.id, purpose="reset_password", used_at=None).update(
+        {"used_at": now_utc()}, synchronize_session=False)
+    db.session.commit()
+    print("Existing platform owner credentials updated. Remove OWNER_CREDENTIAL_RESET after verifying sign-in.")
+
+
 @app.cli.command("init-db")
 def init_db_command():
     """Apply additive compatibility migrations and create initial local defaults."""
