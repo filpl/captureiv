@@ -105,7 +105,7 @@ class TenantIsolationTests(unittest.TestCase):
         remote_addr = f"192.0.2.{(time.time_ns() % 253) + 1}"
         client = portal.app.test_client()
         page = client.get("/login", environ_base={"REMOTE_ADDR": remote_addr})
-        self.assertIn(b"Sign in \xc2\xb7 Construct IV", page.data)
+        self.assertIn(b"Sign in \xc2\xb7 Capture IV", page.data)
         self.assertIn(b"CONSTRUCTION INTELLIGENCE", page.data)
         self.assertNotIn(b"Construction Flight Archive", page.data)
         csrf = re.search(rb'name="_csrf" value="([^\"]+)"', page.data).group(1).decode()
@@ -1115,7 +1115,7 @@ class TenantIsolationTests(unittest.TestCase):
         send_mail.assert_called_once()
         recipient, subject, body = send_mail.call_args.args
         self.assertEqual(recipient, "enterprise-test@example.test")
-        self.assertIn("New Construct IV Enterprise pricing request", subject)
+        self.assertIn("New Capture IV Enterprise pricing request", subject)
         for value in ("Private Inquiry Co", "jordan@example.test", "555-0100", "2 TB", "Need a private workspace."):
             self.assertIn(value, body)
         with portal.app.app_context():

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}{% block title %}Create a company account{% endblock %}{% block content %}
 <section class="login-card saas-card">
-  <div class="brand large"><span class="brand-mark">C</span><span>CONSTRUCT IV<small>CONSTRUCTION INTELLIGENCE</small></span></div>
+  <div class="brand large"><span class="brand-mark">C</span><span>CAPTURE IV<small>CONSTRUCTION INTELLIGENCE</small></span></div>
   <p class="eyebrow">CREATE YOUR WORKSPACE</p><h1>Get started</h1>
   <p class="muted">Create your company workspace. It stays pending until email verification and billing are confirmed.</p>
   {% if pending_checkout %}<p class="flash success">You have a saved pending registration. <a href="{{ url_for('subscription_checkout',subscription_id=pending_checkout.id) }}">Resume checkout</a></p>{% endif %}
@@ -19,6 +19,6 @@
     <label>Confirm password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>
     <button class="button primary full" {% if not plans %}disabled{% endif %}>Create pending account <span>→</span></button>
   </form>
-  <p class="fineprint">Basic includes one active project, two authenticated company accounts, and 1 TB total storage. No storage add-ons are offered. <a href="{{ config.get('MARKETING_SITE_URL', 'http://127.0.0.1:5173/') }}">Back to Construct IV</a></p>
+  <p class="fineprint">Basic includes one active project, two authenticated company accounts, and 1 TB total storage. No storage add-ons are offered. <a href="{{ config.get('MARKETING_SITE_URL', 'http://127.0.0.1:5173/') }}">Back to Capture IV</a></p>
 </section>
 {% endblock %}

@@ -1824,7 +1824,7 @@ def send_account_email(recipient, subject, body):
         return False
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = os.environ.get("MAIL_FROM", "Construct IV <no-reply@constructiv.com>")
+    message["From"] = os.environ.get("MAIL_FROM", "Capture IV <no-reply@captureiv.com>")
     message["To"] = recipient
     message.set_content(body)
     port = int(os.environ.get("SMTP_PORT", "587"))
@@ -1892,7 +1892,7 @@ def register():
             db.session.commit()
             verify_url = absolute_app_url("verify_email", token=raw_token)
             try:
-                delivered = send_account_email(email, "Verify your Construct IV account",
+                delivered = send_account_email(email, "Verify your Capture IV account",
                     f"Hello {first},\n\nVerify your email within 24 hours: {verify_url}\n\nYour account will remain pending until subscription billing is confirmed.")
             except Exception:
                 app.logger.exception("Account verification email delivery failed")
@@ -1947,7 +1947,7 @@ def resend_verification():
         db.session.commit()
         verify_url = absolute_app_url("verify_email", token=raw_token)
         try:
-            delivered = send_account_email(user.email, "Verify your Construct IV account",
+            delivered = send_account_email(user.email, "Verify your Capture IV account",
                 f"Verify your email within 24 hours: {verify_url}\n\nYour account will remain pending until subscription billing is confirmed.")
         except Exception:
             app.logger.exception("Account verification email resend failed")
@@ -1972,7 +1972,7 @@ def forgot_password():
             db.session.commit()
             reset_url = absolute_app_url("reset_password_with_token", token=raw_token)
             try:
-                delivered = send_account_email(email, "Reset your Construct IV password",
+                delivered = send_account_email(email, "Reset your Capture IV password",
                     f"Use this secure link within one hour to set a new password: {reset_url}")
             except Exception:
                 app.logger.exception("Password reset email delivery failed")
@@ -2151,7 +2151,7 @@ def billing_subscription_for_current_company():
 def stripe_period_timestamp(subscription_obj, field="current_period_end"):
     """Support legacy subscription periods and current single-item Billing payloads.
 
-    Construct IV sells one recurring item per company. Do not guess a paid-through
+    Capture IV sells one recurring item per company. Do not guess a paid-through
     date for an unexpected multi-item subscription with different billing periods.
     """
     timestamp = subscription_obj.get(field)
@@ -2203,7 +2203,7 @@ def cancel_subscription():
     audit("subscription_cancellation_scheduled", "subscription", subscription.id,
           f"Cancel at paid-through date {subscription.current_period_end.isoformat() if subscription.current_period_end else 'from Stripe'}")
     try:
-        send_account_email(current_user.email or current_user.username, "Construct IV cancellation scheduled",
+        send_account_email(current_user.email or current_user.username, "Capture IV cancellation scheduled",
                            f"Your {subscription.plan.name if subscription.plan else 'subscription'} renewal is canceled. "
                            f"Paid access remains active through {subscription.current_period_end.strftime('%b %d, %Y') if subscription.current_period_end else 'the paid-through date shown in your billing dashboard'}. "
                            "Your project records and uploaded files have not been deleted. No automatic refund was issued.")
@@ -2653,7 +2653,7 @@ def enterprise_request():
             if ENTERPRISE_INQUIRY_EMAIL:
                 try:
                     notification_delivered = send_account_email(
-                        ENTERPRISE_INQUIRY_EMAIL, "New Construct IV Enterprise pricing request", message)
+                        ENTERPRISE_INQUIRY_EMAIL, "New Capture IV Enterprise pricing request", message)
                 except Exception:
                     app.logger.exception("Enterprise request notification could not be sent")
             return render_template("enterprise_received.html",
@@ -2779,7 +2779,7 @@ def update_subscription_plan(plan_id):
     monthly_price_id = request.form.get("stripe_monthly_price_id", "").strip()[:160]
     annual_price_id = request.form.get("stripe_annual_price_id", "").strip()[:160]
     if monthly_amount != BASIC_MONTHLY_PRICE_CENTS:
-        flash("Construct IV Basic is fixed at $399 per month.", "error")
+        flash("Capture IV Basic is fixed at $399 per month.", "error")
         return redirect(url_for("platform_owner_dashboard"))
     if monthly_price_id and not re.fullmatch(r"price_[A-Za-z0-9]+", monthly_price_id):
         flash("Enter a valid Stripe monthly Price ID.", "error")
@@ -2861,8 +2861,8 @@ def create_owner_company():
 
     setup_url = absolute_app_url("enterprise_setup", token=raw_token)
     try:
-        delivered = send_account_email(email, "Set up your Construct IV Enterprise account",
-            f"Hello {contact},\n\nYour Construct IV workspace is ready for setup. Create your password and continue to secure subscription checkout here: {setup_url}\n\nThe workspace remains inactive until Stripe confirms payment.")
+        delivered = send_account_email(email, "Set up your Capture IV Enterprise account",
+            f"Hello {contact},\n\nYour Capture IV workspace is ready for setup. Create your password and continue to secure subscription checkout here: {setup_url}\n\nThe workspace remains inactive until Stripe confirms payment.")
     except Exception:
         app.logger.exception("Manual Enterprise invitation email delivery failed")
         delivered = False
@@ -2899,7 +2899,7 @@ def resend_manual_company_invite(company_id):
     db.session.commit()
     setup_url = absolute_app_url("enterprise_setup", token=raw_token)
     try:
-        delivered = send_account_email(user.email, "Set up your Construct IV Enterprise account",
+        delivered = send_account_email(user.email, "Set up your Capture IV Enterprise account",
             f"Hello {user.name},\n\nCreate your password and continue to secure subscription checkout here: {setup_url}\n\nThe workspace remains inactive until Stripe confirms payment.")
     except Exception:
         app.logger.exception("Manual Enterprise setup invitation resend failed")
@@ -3003,7 +3003,7 @@ def resend_enterprise_setup(request_id):
     setup_url = absolute_app_url("enterprise_setup", token=raw_token)
     db.session.commit()
     try:
-        delivered = send_account_email(user.email, "Set up your Construct IV Enterprise account",
+        delivered = send_account_email(user.email, "Set up your Capture IV Enterprise account",
             f"Create your password and continue to secure checkout: {setup_url}")
     except Exception:
         app.logger.exception("Enterprise setup resend failed")
@@ -3077,7 +3077,7 @@ def provision_enterprise_request(request_id):
 
     setup_url = absolute_app_url("enterprise_setup", token=raw_token)
     try:
-        delivered = send_account_email(email, "Set up your Construct IV Enterprise account",
+        delivered = send_account_email(email, "Set up your Capture IV Enterprise account",
             f"Hello {item.contact_name},\n\nYour Enterprise request has been approved. Create your account password and continue to secure subscription checkout here: {setup_url}\n\nThe workspace will remain inactive until Stripe confirms payment.")
     except Exception:
         app.logger.exception("Enterprise invitation email delivery failed")
@@ -3237,7 +3237,7 @@ def dashboard():
         billing_summary = {
             "plan": plan.name if plan else "Custom workspace",
             "interval": subscription.billing_interval or "monthly",
-            "price": f"${amount_cents / 100:,.2f} / {subscription.billing_interval or 'month'}" if amount_cents is not None else "Price configured by Construct IV",
+            "price": f"${amount_cents / 100:,.2f} / {subscription.billing_interval or 'month'}" if amount_cents is not None else "Price configured by Capture IV",
             "status": ("Canceling" if subscription.cancel_at_period_end and subscription.status in {"active", "trialing"}
                        else subscription.status.replace("_", " ").title()),
             "period_end": subscription.current_period_end,
@@ -4481,8 +4481,8 @@ def create_user():
     db.session.commit()
     invite_url = absolute_app_url("employee_setup", token=raw_token)
     try:
-        delivered = send_account_email(email, "Set up your Construct IV account",
-            f"Hello {name},\n\nYour company invited you to Construct IV. Choose a password using this secure link within 48 hours: {invite_url}")
+        delivered = send_account_email(email, "Set up your Capture IV account",
+            f"Hello {name},\n\nYour company invited you to Capture IV. Choose a password using this secure link within 48 hours: {invite_url}")
     except Exception:
         app.logger.exception("Employee invitation email delivery failed")
         delivered = False
@@ -4548,8 +4548,8 @@ def resend_employee_invite(user_id):
     db.session.commit()
     invite_url = absolute_app_url("employee_setup", token=raw_token)
     try:
-        delivered = send_account_email(user.email, "Set up your Construct IV account",
-            f"Hello {user.name},\n\nYour company invited you to Construct IV. Choose a password using this secure link within 48 hours: {invite_url}")
+        delivered = send_account_email(user.email, "Set up your Capture IV account",
+            f"Hello {user.name},\n\nYour company invited you to Capture IV. Choose a password using this secure link within 48 hours: {invite_url}")
     except Exception:
         app.logger.exception("Employee invitation resend failed")
         delivered = False
