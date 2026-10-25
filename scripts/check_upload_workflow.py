@@ -68,9 +68,9 @@ def check():
                     expected.update(block)
             payload = {'filename': video.name, 'size': video.stat().st_size, 'lastModified': 1,
                 'date': portal.now_utc().date().isoformat(), 'project': 'Isolated diagnostic site',
-                'direction': 'N-S', 'title': 'Diagnostic video'}
+                'direction': portal.DIRECTIONS[0], 'title': 'Diagnostic video'}
             started = client.post('/admin/r2-upload/start', json=payload, headers=headers)
-            require(started.status_code == 200, 'Application rejected upload start')
+            require(started.status_code == 200, 'Application rejected upload start (HTTP '+str(started.status_code)+')')
             upload = started.get_json()
             require(upload['partCount'] == 2, 'Two real multipart parts required')
             upload_id = upload['uploadId']
