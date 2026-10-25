@@ -62,6 +62,32 @@ class OwnerRecoveryTests(unittest.TestCase):
         self.assertNotEqual(self.recover().exit_code, 0)
         self.assertEqual(self.owner.username, 'old-owner')
 
+    def test_owner_login_retains_session_without_a_company_subscription(self):
+        self.assertEqual(self.recover().exit_code, 0)
+        portal.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
+        client = portal.app.test_client()
+        client.get('/login')
+        with client.session_transaction() as state:
+            token = state['_csrf']
+        response = client.post('/login', data={'username': 'platform-owner',
+            'password': 'new-disposable-password', '_csrf': token}, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Platform Owner', response.get_data(as_text=True))
+        self.assertNotEqual(response.request.path, '/login')
+        with client.session_transaction() as state:
+            self.assertEqual(state['_user_id'], str(self.owner_id))
+        self.assertEqual(client.get('/dashboard').status_code, 302)
+
+    def test_non_owner_without_membership_still_cannot_access_owner_pages(self):
+        portal.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state['_user_id'] = str(self.other.id)
+            state['_fresh'] = True
+        response = client.get('/owner')
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login', response.location)
+
 
 if __name__ == '__main__':
     unittest.main()

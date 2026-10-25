@@ -863,6 +863,9 @@ def subscription_retrieval_deadline(subscription):
 def enforce_workspace_billing_window():
     if not has_request_context() or not current_user.is_authenticated or request.endpoint == "logout":
         return
+    # Platform staff administer paying companies without owning a subscription.
+    if current_user.platform_owner and current_user.active:
+        return
     membership = current_membership()
     if not membership or not membership.company:
         pending_membership = CompanyMembership.query.filter_by(user_id=current_user.id, role="company_admin",
@@ -1786,7 +1789,7 @@ def render_project_view(access):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("platform_owner_dashboard" if current_user.platform_owner else "dashboard"))
     if request.method == "POST":
         username = request.form.get("username", "").strip().lower()
         password = request.form.get("password", "")
@@ -1809,7 +1812,7 @@ def login():
             user.last_login_at = now_utc()
             db.session.commit()
             audit("login", "user", user.id, "Successful login")
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("platform_owner_dashboard" if user.platform_owner else "dashboard"))
         flash("Incorrect username or password.", "error")
     return render_template("login.html")
 
@@ -3166,6 +3169,8 @@ def retrieve_workspace():
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    if current_user.platform_owner:
+        return redirect(url_for("platform_owner_dashboard"))
     features = {key: company_feature_enabled(key) for key in PLAN_FEATURES}
     selected_date = parse_date(request.args.get("date"))
     project = request.args.get("project", "").strip()[:160]
