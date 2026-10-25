@@ -8,6 +8,7 @@ import math
 import time
 from datetime import datetime, date, timedelta
 from functools import wraps
+from types import SimpleNamespace
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlsplit
 from uuid import uuid4
@@ -633,6 +634,17 @@ TENANT_MODELS = (ProjectAccess, ProjectSiteMap, ProjectPhotoReference, ProjectPh
 def current_membership():
     if not has_request_context() or not current_user.is_authenticated:
         return None
+    # Owners explicitly choose one workspace; keep the normal tenant filters.
+    # This is request context, not a persisted membership or employee seat.
+    if current_user.platform_owner and current_user.active:
+        company_id = session.get("owner_company_id")
+        if company_id:
+            company = Company.query.filter_by(id=company_id, status="active").first()
+            if company:
+                return SimpleNamespace(company=company, company_id=company.id,
+                    user=current_user, user_id=current_user.id, role="company_admin", status="active")
+        # Preserve an owner's existing company membership when no workspace
+        # has been selected (for example, an account promoted from company admin).
     return CompanyMembership.query.filter_by(user_id=current_user.id, status="active").first()
 
 
@@ -774,6 +786,51 @@ def csrf_token():
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+
+WORKSPACE_PAGES = {"dashboard", "admin", "upload", "site_capture", "fieldview_sandbox"}
+
+
+@app.context_processor
+def navigation_context():
+    endpoint = request.endpoint or ""
+    if endpoint.startswith("platform_owner") or endpoint == "select_owner_workspace":
+        section = "owner"
+    elif endpoint == "fieldview_sandbox":
+        section = "sandbox"
+    elif endpoint == "upload" or request.path.startswith(("/admin/upload", "/admin/r2-upload")):
+        section = "upload"
+    elif endpoint == "billing_portal":
+        section = "billing"
+    elif request.path.startswith("/admin"):
+        section = "admin"
+    else:
+        section = "archive"
+    membership = current_membership()
+    return {"nav_section": section, "nav_company": membership.company if membership else None,
+            "owner_workspace_choices": Company.query.filter_by(status="active").order_by(Company.name).all()
+                if current_user.is_authenticated and current_user.platform_owner and current_user.active else []}
+
+
+@app.before_request
+def prompt_owner_workspace():
+    if (request.method in {"GET", "HEAD"} and request.endpoint in WORKSPACE_PAGES
+            and current_user.is_authenticated and current_user.platform_owner and current_user.active
+            and not current_membership()):
+        return render_template("workspace_select.html")
+
+
+@app.post("/owner/workspace")
+@platform_owner_required
+def select_owner_workspace():
+    company_id = request.form.get("company_id", type=int)
+    company = Company.query.filter_by(id=company_id, status="active").first()
+    if not company:
+        abort(404)
+    session["owner_company_id"] = company.id
+    destination = request.form.get("next_endpoint", "dashboard")
+    if destination not in WORKSPACE_PAGES:
+        destination = "dashboard"
+    return redirect(url_for(destination))
 
 
 @app.before_request
@@ -3169,8 +3226,6 @@ def retrieve_workspace():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    if current_user.platform_owner:
-        return redirect(url_for("platform_owner_dashboard"))
     features = {key: company_feature_enabled(key) for key in PLAN_FEATURES}
     selected_date = parse_date(request.args.get("date"))
     project = request.args.get("project", "").strip()[:160]
@@ -4777,7 +4832,7 @@ def too_large(_):
 
 @app.errorhandler(403)
 def forbidden(_):
-    return render_template("login.html", error="You do not have permission to access that page."), 403
+    return render_template("access_denied.html"), 403
 
 
 def init_db():

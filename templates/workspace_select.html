@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Choose a company workspace{% endblock %}
+{% block content %}
+<section class="workspace-guide">
+  <p class="eyebrow">PLATFORM OWNER</p><h1>Choose a company workspace</h1>
+  <p>You are signed in. Select a company above to manage its archive, projects, and uploads. Your selection stays with you as you switch pages.</p>
+  {% if not owner_workspace_choices %}<p>No active company workspace is available yet. Create or activate a company in Platform Owner to get started.</p>{% endif %}
+  <a class="button" href="{{ url_for('platform_owner_dashboard') }}">Manage companies</a>
+</section>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Access unavailable{% endblock %}
+{% block content %}
+<section class="workspace-guide"><h1>Access unavailable</h1>
+{% if current_user.is_authenticated %}
+<p>You are still signed in. Your account or current company plan does not have access to this page.</p>
+<a class="button" href="{{ url_for('platform_owner_dashboard') if current_user.platform_owner else url_for('dashboard') }}">Return to your dashboard</a>
+{% else %}<p>Sign in with an account that has permission to open this page.</p><a class="button" href="{{ url_for('login') }}">Sign in</a>{% endif %}
+</section>
+{% endblock %}

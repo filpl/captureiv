@@ -76,7 +76,7 @@ class OwnerRecoveryTests(unittest.TestCase):
         self.assertNotEqual(response.request.path, '/login')
         with client.session_transaction() as state:
             self.assertEqual(state['_user_id'], str(self.owner_id))
-        self.assertEqual(client.get('/dashboard').status_code, 302)
+        self.assertEqual(client.get('/dashboard').status_code, 200)
 
     def test_non_owner_without_membership_still_cannot_access_owner_pages(self):
         portal.app.config.update(TESTING=True, SESSION_COOKIE_SECURE=False)

@@ -8,13 +8,10 @@
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
   <link rel="stylesheet" href="/static/fieldview-sandbox/style.css?v=module-picker-5">
+<link rel="stylesheet" href="{{ url_for('static', filename='navigation.css') }}?v=20261025">
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="#"><span class="brand-mark">△</span><span>CAPTURE IV<small>Intelligence Visuals</small></span></a>
-    <div class="top-context"><span class="sandbox-dot"></span> Interactive sandbox <span class="divider">/</span> Administration</div>
-    <div class="top-user"><span class="user-avatar">MS</span><span>Marwan Salem<small>Administrator</small></span><button class="icon-button" aria-label="More options">•••</button></div>
-  </header>
+  {% include "_topbar.html" %}
 
   <div class="app-shell">
     <aside class="sidebar">
