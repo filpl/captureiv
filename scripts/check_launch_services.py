@@ -12,6 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app as portal
 
 
+class DiagnosticFailure(ValueError):
+    """Only deliberately authored, non-sensitive diagnostic messages."""
+
+
 def read_url(url, *, data=None, method=None, headers=None):
     with urlopen(Request(url, data=data, method=method, headers=headers or {}), timeout=30) as response:
         return response.read(), response.headers
@@ -26,20 +30,21 @@ def storage_check(run_id):
         path.write_bytes(body)
         storage.upload_file(path, key, 'text/plain')
     if storage.object_size(key) != len(body):
-        raise ValueError('Storage size mismatch')
+        raise DiagnosticFailure('Storage size mismatch')
     signed = storage.signed_download(key, 'private-upload-check.txt', 'text/plain', True, expires=60)
     downloaded, _ = read_url(signed)
     if hashlib.sha256(downloaded).digest() != hashlib.sha256(body).digest():
-        raise ValueError('Storage content mismatch')
+        raise DiagnosticFailure('Storage content mismatch')
     unsigned_parts = urlsplit(signed)
     unsigned = urlunsplit((unsigned_parts.scheme, unsigned_parts.netloc, unsigned_parts.path, '', ''))
     try:
         read_url(unsigned)
     except HTTPError as error:
         if error.code not in {401, 403, 404}:
-            raise ValueError('Unexpected private-access response') from None
+            raise DiagnosticFailure('Unexpected private-access response') from None
     else:
-        raise ValueError('Unauthenticated object access succeeded')
+        raise DiagnosticFailure('Unauthenticated object access succeeded')
+    print('PASS: managed R2 upload, checksum download and unauthenticated access rejection.')
     # Exercise the same signed multipart PUT used for browser drone uploads.
     multipart_key = f'diagnostics/{run_id}/multipart-upload-check.txt'
     upload_id = storage.start_multipart(multipart_key, 'text/plain')
@@ -48,18 +53,18 @@ def storage_check(run_id):
         'Origin': 'https://app.captureiv.com', 'Access-Control-Request-Method': 'PUT',
         'Access-Control-Request-Headers': 'content-type'})
     if cors.get('Access-Control-Allow-Origin') != 'https://app.captureiv.com':
-        raise ValueError('Browser upload CORS origin was not allowed')
+        raise DiagnosticFailure('Browser upload CORS origin was not allowed')
     _, headers = read_url(part_url, data=body, method='PUT', headers={'Content-Type': 'text/plain'})
     etag = headers.get('ETag')
     if not etag:
-        raise ValueError('Multipart response missing ETag')
+        raise DiagnosticFailure('Multipart response missing ETag')
     parts = storage.list_multipart_parts(multipart_key, upload_id)
     if len(parts) != 1 or parts[0]['PartNumber'] != 1:
-        raise ValueError('Multipart part not listed')
+        raise DiagnosticFailure('Multipart part not listed')
     storage.complete_multipart(multipart_key, upload_id, [{'PartNumber': 1, 'ETag': etag}])
     multipart_url = storage.signed_download(multipart_key, 'multipart-upload-check.txt', 'text/plain', True, expires=60)
     if read_url(multipart_url)[0] != body:
-        raise ValueError('Multipart download mismatch')
+        raise DiagnosticFailure('Multipart download mismatch')
     print('PASS: R2 upload, checksum download, private access, browser CORS and signed multipart transfer.')
     print('Two tiny diagnostic objects retained under diagnostics/' + run_id + '/.')
 
@@ -71,7 +76,7 @@ def email_check(recipient):
         'No password, verification code or payment information is included.\n\n'
         'Platform: https://app.captureiv.com/login\n')
     if not sent:
-        raise ValueError('Email service is not configured')
+        raise DiagnosticFailure('Email service is not configured')
     print('PASS: SMTP authenticated and accepted the requested test email. Check provider delivery status.')
 
 
@@ -95,6 +100,8 @@ def run_once(run_id, name, callback):
             status = None
         print('FAIL: ' + name + ' (' + type(error).__name__ +
               (', status ' + str(status) if status else '') + '). No credential details logged.')
+        if isinstance(error, DiagnosticFailure):
+            print('DETAIL: ' + str(error))
         return False
 
 
