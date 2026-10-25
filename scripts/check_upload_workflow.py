@@ -98,16 +98,27 @@ def check():
             with urlopen(Request(authorized.location, headers={'Range':'bytes=0-63'}), timeout=30) as response:
                 require(response.status == 206 and response.read() == fixture[:64], 'Video range streaming failed')
             anonymous = portal.app.test_client()
+            # This probe holds an outer app context; real HTTP requests do not.
+            # Reset Flask-Login's per-request cache before changing test clients.
+            portal.g.pop('_login_user', None)
             require(anonymous.get(route).status_code in (401,403,404), 'Anonymous file access was allowed')
             other_client = portal.app.test_client()
             with other_client.session_transaction() as session:
                 session['_user_id'] = str(outsider.id)
                 session['_fresh'] = True
+            portal.g.pop('_login_user', None)
             require(other_client.get(route).status_code in (403,404), 'Other company could access the file')
             # Delete only the UUID object this isolated probe just created, never customer data.
             key = portal.r2_object_key(flight.filename)
             require(key.startswith('companies/2147483000/uploads/' + upload_id + '-'), 'Diagnostic cleanup key mismatch')
-            portal.R2Storage().delete(key)
+            storage = portal.R2Storage()
+            storage.delete(key)
+            # Also remove only this probe's UUID-named leftovers from interrupted runs.
+            for page in storage.client.get_paginator('list_objects_v2').paginate(
+                    Bucket=storage.bucket, Prefix='companies/2147483000/uploads/'):
+                for item in page.get('Contents', []):
+                    if portal.re.fullmatch(r'companies/2147483000/uploads/[0-9a-f-]{36}-captureiv-diagnostic\.mp4', item['Key']):
+                        storage.delete(item['Key'])
             portal.db.session.remove()
             portal.db.engine.dispose()
     print('PASS: real 64+ MiB application upload, two multipart parts, resume, finalize, checksum download, range streaming and anonymous/cross-company denial. Diagnostic object removed; production records untouched.')
