@@ -106,7 +106,7 @@ class TenantIsolationTests(unittest.TestCase):
         client = portal.app.test_client()
         page = client.get("/login", environ_base={"REMOTE_ADDR": remote_addr})
         self.assertIn(b"Sign in \xc2\xb7 Capture IV", page.data)
-        self.assertIn(b"Intelligence visualized", page.data)
+        self.assertIn(b"Intelligence Visuals", page.data)
         self.assertNotIn(b"Construction Flight Archive", page.data)
         csrf = re.search(rb'name="_csrf" value="([^\"]+)"', page.data).group(1).decode()
         for _ in range(15):

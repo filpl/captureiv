@@ -1,6 +1,6 @@
 {% extends 'base.html' %}{% block title %}Create a company account{% endblock %}{% block content %}
 <section class="login-card saas-card">
-  <div class="brand large"><span class="brand-mark">C</span><span>CAPTURE IV<small>Intelligence visualized</small></span></div>
+  <div class="brand large"><span class="brand-mark">C</span><span>CAPTURE IV<small>Intelligence Visuals</small></span></div>
   <p class="eyebrow">CREATE YOUR WORKSPACE</p><h1>Get started</h1>
   <p class="muted">Create your company workspace. It stays pending until email verification and billing are confirmed.</p>
   {% if pending_checkout %}<p class="flash success">You have a saved pending registration. <a href="{{ url_for('subscription_checkout',subscription_id=pending_checkout.id) }}">Resume checkout</a></p>{% endif %}
