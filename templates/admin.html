@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Admin{% endblock %}
 {% block content %}
+{% include "_upload_rights.html" %}
 <div class="page-heading">
   <div><p class="eyebrow">CONTROL ROOM</p><h1>Administration</h1><p class="muted">Manage footage, project viewing, and team access.</p></div>
   {% if features.flight_scans %}<a class="button primary" href="{{ url_for('upload') }}">＋ Upload footage</a>{% endif %}

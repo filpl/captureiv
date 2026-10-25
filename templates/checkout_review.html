@@ -32,7 +32,9 @@
   {% if checkout_ready %}
   <form method="post" class="checkout-accept-form">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-    <label class="checkout-accept"><input type="checkbox" name="accept_billing_terms" value="yes" required><span>I have reviewed and agree to the billing and cancellation terms above.</span></label>
+    <p class="checkout-renewal-notice" id="renewal-disclosure"><strong>Automatic renewal:</strong> {% if renewal_amount_cents is not none %}${{ '%.2f'|format(renewal_amount_cents / 100) }} per company per {{ renewal_interval }}{% else %}The amount in your order summary per {{ renewal_interval }}{% endif %}, until cancelled. Cancel through <strong>Billing</strong> in your company account before the next renewal. Cancellation takes effect at the end of the paid period.</p>
+    <label class="checkout-accept"><input type="checkbox" name="accept_billing_terms" value="yes" required aria-describedby="renewal-disclosure"><span>I expressly agree to automatic recurring billing at the amount and interval above, and to the billing, cancellation and refund terms shown here.</span></label>
+    <p class="fineprint"><a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/billing" target="_blank" rel="noopener">Billing &amp; cancellation details</a> · Terms version {{ billing_terms_version }}. Save or print this page for your records.</p>
     <button type="submit" class="button primary full">Continue to secure payment →</button>
   </form>
   {% else %}

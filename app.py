@@ -157,6 +157,7 @@ if app_env == "production":
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxy_count, x_proto=1)
 ENTERPRISE_INQUIRY_EMAIL = os.environ.get("ENTERPRISE_INQUIRY_EMAIL", "").strip()
 STRIPE_API_VERSION = "2026-09-30.endive"
+BILLING_TERMS_VERSION = "2026-10-25"
 
 
 def stripe_api_key_is_valid(key=None, environment=None):
@@ -2088,7 +2089,16 @@ def subscription_checkout(subscription_id):
         (plan.stripe_annual_price_id if subscription.billing_interval == "annual" else plan.stripe_monthly_price_id)
         if plan else "")
     checkout_ready = stripe_api_key_is_valid(stripe_key) and bool(price_id)
+    amount_cents = (subscription.custom_amount_cents if plan and plan.custom_pricing else
+                    (plan.annual_amount_cents if subscription.billing_interval == "annual"
+                     else plan.monthly_amount_cents) if plan else None)
+    renewal_interval = "year" if subscription.billing_interval == "annual" else "month"
+    agreement = {"version": BILLING_TERMS_VERSION, "subscription_id": subscription.id,
+        "company_id": subscription.company_id, "price_id": price_id,
+        "amount_cents": amount_cents, "currency": "usd", "interval": renewal_interval,
+        "automatic_renewal": True, "cancellation": "end_of_paid_period", "retrieval_days": 90}
     if request.method == "GET":
+        session["billing_review"] = agreement
         if not stripe_api_key_is_valid(stripe_key):
             checkout_message = "Secure checkout is not connected yet. Your registration is saved; no payment can be taken."
         elif not price_id:
@@ -2098,9 +2108,13 @@ def subscription_checkout(subscription_id):
             checkout_message = "You will continue to Stripe's secure checkout after reviewing the terms below."
         return render_template("checkout_review.html", subscription=subscription,
                                plan=plan, checkout_ready=checkout_ready,
-                               checkout_message=checkout_message)
+                               checkout_message=checkout_message, renewal_amount_cents=amount_cents,
+                               renewal_interval=renewal_interval, billing_terms_version=BILLING_TERMS_VERSION)
     if request.form.get("accept_billing_terms") != "yes":
         flash("Please review and accept the billing terms before continuing.", "error")
+        return redirect(url_for("subscription_checkout", subscription_id=subscription.id))
+    if session.get("billing_review") != agreement:
+        flash("The billing details have changed or have not been reviewed. Review them again before continuing.", "error")
         return redirect(url_for("subscription_checkout", subscription_id=subscription.id))
     if not stripe_api_key_is_valid(stripe_key):
         flash("Secure subscription checkout is not configured yet. Your registration is saved as pending.", "error")
@@ -2109,6 +2123,19 @@ def subscription_checkout(subscription_id):
         stripe_mode = "live" if app.config.get("APP_ENV") == "production" else "test"
         flash(f"This plan is not connected to a Stripe {stripe_mode} price yet. No payment was taken.", "error")
         return redirect(url_for("register"))
+    # Retain evidence of the displayed recurring-billing agreement before
+    # starting payment. Do not send the customer to checkout if saving fails.
+    consent = AuditLog(user_id=membership.user_id, action="billing_terms_accepted",
+        resource_type="company_subscription", resource_id=str(subscription.id),
+        detail=json.dumps(agreement),
+        ip_address=(request.remote_addr or "")[:80])
+    try:
+        db.session.add(consent)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Billing consent could not be saved")
+        abort(503, "Your agreement could not be saved. No checkout was started. Please try again.")
     fields = {
         "mode": "subscription", "success_url": absolute_app_url("checkout_pending"),
         "cancel_url": absolute_app_url("register"), "client_reference_id": str(subscription.id),

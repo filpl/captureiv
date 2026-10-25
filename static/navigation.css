@@ -12,3 +12,5 @@
 .workspace-guide{max-width:720px;background:#fff;border:1px solid #e0e6e2;border-radius:14px;padding:32px;margin:30px auto}
 .workspace-guide p{line-height:1.7;color:#607067}
 @media(max-width:900px){.platform-topbar{padding:14px 18px}.platform-topbar .platform-nav{order:3;flex-basis:100%;margin-left:0}.platform-topbar .user-menu{margin-left:auto}.owner-workspace-switch{order:4}.platform-topbar .platform-nav .nav-link{padding:8px 11px}}
+
+.platform-policy-links{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;padding:28px 20px;color:#607067;font-size:12px}.platform-policy-links a,.upload-rights-note a{text-decoration:underline}.platform-policy-links span{flex-basis:100%;text-align:center}.upload-rights-note{font-size:13px;line-height:1.6;color:#617168;background:#f3f7f4;border:1px solid #dde6df;padding:12px 16px;border-radius:8px;margin:12px 0 20px}.checkout-renewal-notice{border:1px solid #a4c7af;border-radius:8px;padding:14px;line-height:1.6;background:#eff7f1;color:#254c32}
