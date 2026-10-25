@@ -3,6 +3,8 @@ import argparse
 import hashlib
 import sys
 import tempfile
+import subprocess
+from xml.etree import ElementTree
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit, urlunsplit
@@ -14,6 +16,18 @@ import app as portal
 
 class DiagnosticFailure(ValueError):
     """Only deliberately authored, non-sensitive diagnostic messages."""
+
+
+def is_authorization_rejection(error):
+    if error.code in {401, 403, 404}:
+        return True
+    if error.code != 400:
+        return False
+    try:
+        body = ElementTree.fromstring(error.read(4096))
+        return body.findtext('Code') == 'InvalidArgument' and body.findtext('Message') == 'Authorization'
+    except ElementTree.ParseError:
+        return False
 
 
 def read_url(url, *, data=None, method=None, headers=None):
@@ -40,7 +54,7 @@ def storage_check(run_id):
     try:
         read_url(unsigned)
     except HTTPError as error:
-        if error.code not in {401, 403, 404}:
+        if not is_authorization_rejection(error):
             raise DiagnosticFailure('Unexpected private-access response') from None
     else:
         raise DiagnosticFailure('Unauthenticated object access succeeded')
@@ -109,13 +123,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--email', required=True)
+    parser.add_argument('--application-flow', action='store_true')
     args = parser.parse_args()
     if not portal.re.fullmatch(r'[a-zA-Z0-9_-]{1,60}', args.run_id):
         parser.error('Run ID must contain only letters, numbers, underscores or hyphens.')
     with portal.app.app_context():
         storage_ok = run_once(args.run_id, 'storage', lambda: storage_check(args.run_id))
         email_ok = run_once(args.run_id, 'email', lambda: email_check(args.email))
-    return 0 if storage_ok and email_ok else 1
+        application_ok = True
+        if args.application_flow and storage_ok:
+            application_ok = run_once(args.run_id, 'upload_workflow', lambda: subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('check_upload_workflow.py'))], check=True))
+    return 0 if storage_ok and email_ok and application_ok else 1
 
 
 if __name__ == '__main__':
