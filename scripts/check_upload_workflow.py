@@ -20,6 +20,12 @@ def require(condition, message):
         raise ProbeFailure(message)
 
 
+def reset_request_state(portal):
+    """Emulate a fresh real HTTP request when holding an outer test app context."""
+    for name in list(portal.g):
+        portal.g.pop(name, None)
+
+
 def check():
     with tempfile.TemporaryDirectory(prefix='captureiv-upload-probe-') as directory:
         # Override only this subprocess: production DB, users and billing stay untouched.
@@ -100,13 +106,13 @@ def check():
             anonymous = portal.app.test_client()
             # This probe holds an outer app context; real HTTP requests do not.
             # Reset Flask-Login's per-request cache before changing test clients.
-            portal.g.pop('_login_user', None)
+            reset_request_state(portal)
             require(anonymous.get(route).status_code in (401,403,404), 'Anonymous file access was allowed')
             other_client = portal.app.test_client()
             with other_client.session_transaction() as session:
                 session['_user_id'] = str(outsider.id)
                 session['_fresh'] = True
-            portal.g.pop('_login_user', None)
+            reset_request_state(portal)
             require(other_client.get(route).status_code in (403,404), 'Other company could access the file')
             # Delete only the UUID object this isolated probe just created, never customer data.
             key = portal.r2_object_key(flight.filename)
