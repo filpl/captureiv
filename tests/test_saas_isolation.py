@@ -361,9 +361,7 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(unlocked.status_code, 302)
         self.assertIn("tab=media", unlocked.headers["Location"])
         media_denied = client.get(unlocked.headers["Location"])
-        self.assertEqual(media_denied.status_code, 302)
-        self.assertIn("tab=map", media_denied.headers["Location"])
-        self.assertNotIn("BBBB", media_denied.headers["Location"])
+        self.assertEqual(media_denied.status_code, 403)
         self.assertEqual(client.get("/files/private.pdf").status_code, 403)
 
     def test_viewer_links_expire_and_can_be_revoked(self):
@@ -396,11 +394,14 @@ class TenantIsolationTests(unittest.TestCase):
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', challenge.data).group(1).decode()
         unlocked = client.post(f"/share/{token}", data={"_csrf": csrf, "code": access_code, "next_tab": "map"})
         self.assertEqual(unlocked.status_code, 302)
-        self.assertEqual(client.get(unlocked.headers["Location"]).status_code, 200)
+        media_redirect = client.get(unlocked.headers["Location"])
+        self.assertEqual(media_redirect.status_code, 302)
+        self.assertIn("tab=media", media_redirect.headers["Location"])
+        self.assertEqual(client.get(media_redirect.headers["Location"]).status_code, 200)
         self.assertEqual(client.get("/project/OLD1").status_code, 404)
         page = client.get("/admin")
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
-        self.assertIn(b"Revoke link", page.data)
+        self.assertIn(b"Revoke code", page.data)
         response = client.post(f"/admin/projects/access/{access_id}/revoke", data={"_csrf": csrf})
         self.assertEqual(response.status_code, 302)
         with portal.app.app_context():
@@ -511,7 +512,7 @@ class TenantIsolationTests(unittest.TestCase):
             self.assertEqual(by_project[1]["A project"], 100)
             self.assertEqual(totals[2], 12)
 
-    def test_pinned_photo_upload_is_private_and_viewable_from_project_map(self):
+    def test_clients_cannot_view_pinned_photos_or_open_map_tabs(self):
         project, pin_id = "Pinned photo regression", "photo-pin-test-001"
         code = "PHTX"
         with portal.app.app_context():
@@ -523,7 +524,7 @@ class TenantIsolationTests(unittest.TestCase):
                     original_filename="site-reference.png", file_size=0),
                 portal.ProjectSiteSetup(company_id=1, project=project, module="image",
                     center_lat=40.2744, center_lng=-76.8871, zoom=16),
-                portal.ProjectAccess(company_id=1, project=project, code=code),
+                portal.ProjectAccess(company_id=1, project=project, code=code, allow_media=True),
             ])
             portal.db.session.commit()
             token = portal.ProjectAccess.query.filter_by(company_id=1, project=project).one().share_token
@@ -561,10 +562,15 @@ class TenantIsolationTests(unittest.TestCase):
         })
         self.assertEqual(unlock.status_code, 302, unlock.get_data(as_text=True))
         page = viewer.get(unlock.headers["Location"])
+        if page.status_code == 302:
+            page = viewer.get(page.headers["Location"])
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"PROJECT_PHOTO_PINS", page.data)
-        self.assertIn(b"North facade", page.data)
-        self.assertIn(b"/files/pinned-photo-one.jpg", page.data)
+        self.assertIn(b"Project footage", page.data)
+        self.assertNotIn(b"PROJECT_PHOTO_PINS", page.data)
+        self.assertNotIn(b"North facade", page.data)
+        self.assertNotIn(b"/files/pinned-photo-one.jpg", page.data)
+        self.assertEqual(viewer.get(f"/share/{token}?tab=map").status_code, 302)
+        self.assertEqual(viewer.get("/files/pinned-photo-one.jpg").status_code, 403)
 
         foreign_viewer = portal.app.test_client()
         with foreign_viewer.session_transaction() as state:
@@ -576,6 +582,82 @@ class TenantIsolationTests(unittest.TestCase):
                           portal.ProjectSiteMap, portal.ProjectSiteSetup, portal.ProjectAccess):
                 model.query.filter_by(project=project, company_id=1).delete(synchronize_session=False)
             portal.db.session.commit()
+
+    def test_platform_owner_can_create_nonbillable_footage_only_demo(self):
+        client = portal.app.test_client()
+        with portal.app.app_context():
+            owner = portal.User(username="demo-owner-test", name="Owner", platform_owner=True,
+                                active=True, email_verified=True)
+            owner.set_password("demo-owner-test-password")
+            portal.db.session.add(owner)
+            portal.db.session.commit()
+            owner_id = owner.id
+        with client.session_transaction() as state:
+            state["_user_id"] = str(owner_id)
+            state["_fresh"] = True
+        owner_page = client.get("/owner")
+        self.assertEqual(owner_page.status_code, 200)
+        csrf = re.search(rb'name="_csrf" value="([^\"]+)"', owner_page.data).group(1).decode()
+        with patch.object(portal, "send_account_email", return_value=True) as send_email:
+            response = client.post("/owner/demo-workspace/create", data={
+                "_csrf": csrf,
+                "company_name": "Clark Construction Test Demo",
+                "project_name": "York Data Center Test",
+                "admin_email": "demo-admin@example.test",
+            })
+        self.assertEqual(response.status_code, 302)
+        send_email.assert_called_once()
+        result_page = client.get(response.headers["Location"])
+        self.assertIn(b"Demo workspace is ready", result_page.data)
+        self.assertIn(b"demo-admin@example.test", result_page.data)
+        with portal.app.app_context():
+            company = portal.Company.query.filter_by(name="Clark Construction Test Demo").one()
+            subscription = portal.CompanySubscription.query.filter_by(company_id=company.id).one()
+            access = portal.ProjectAccess.query.filter_by(company_id=company.id).one()
+            membership = portal.CompanyMembership.query.filter_by(company_id=company.id).one()
+            self.assertTrue(company.is_demo)
+            self.assertEqual(company.status, "active")
+            self.assertEqual(subscription.status, "trialing")
+            self.assertFalse(subscription.stripe_customer_id)
+            self.assertIsNone(subscription.stripe_subscription_id)
+            self.assertEqual(access.project, "York Data Center Test")
+            self.assertTrue(access.allow_media)
+            self.assertFalse(access.allow_documents)
+            self.assertFalse(access.allow_overview)
+            self.assertGreater(access.expires_at, portal.now_utc() + portal.timedelta(days=6))
+            self.assertEqual(membership.role, "company_admin")
+            self.assertEqual(membership.status, "pending")
+            code, company_id = access.code, company.id
+
+        visitor = portal.app.test_client()
+        landing = visitor.get("/")
+        visitor_csrf = re.search(rb'name="_csrf" value="([^\"]+)"', landing.data).group(1).decode()
+        unlocked = visitor.post("/", data={"_csrf": visitor_csrf, "code": code})
+        self.assertEqual(unlocked.status_code, 302)
+        viewer_page = visitor.get(unlocked.headers["Location"])
+        self.assertEqual(viewer_page.status_code, 200)
+        self.assertIn(b"Drone footage", viewer_page.data)
+        self.assertNotIn(b"Documents", viewer_page.data)
+        self.assertNotIn(b"Map", viewer_page.data)
+
+        with portal.app.app_context():
+            portal.db.session.add(portal.ProjectFile(company_id=company_id,
+                date=date(2026, 10, 26), name="Private document", filename="demo-private.pdf",
+                uploaded_by=owner_id, project="York Data Center Test", file_size=1))
+            portal.db.session.commit()
+        self.assertEqual(visitor.get("/files/demo-private.pdf").status_code, 403)
+        with portal.app.app_context():
+            owner_csrf = re.search(rb'name="_csrf" value="([^\"]+)"', client.get("/owner").data).group(1).decode()
+        deleted = client.post(f"/owner/companies/{company_id}/delete-demo", data={"_csrf": owner_csrf})
+        self.assertEqual(deleted.status_code, 302)
+        with portal.app.app_context():
+            demo_plan = portal.SubscriptionPlan.query.filter_by(name="Demo - Non-billable").first()
+            if demo_plan:
+                portal.db.session.delete(demo_plan)
+                portal.AuditLog.query.filter_by(user_id=owner_id).update(
+                    {"user_id": None}, synchronize_session=False)
+                portal.db.session.delete(portal.db.session.get(portal.User, owner_id))
+                portal.db.session.commit()
 
     def test_platform_owner_storage_metrics_render(self):
         with portal.app.app_context():
@@ -1672,3 +1754,4 @@ class TenantIsolationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
