@@ -4,9 +4,10 @@
     {% set links = [('archive', 'dashboard', 'Archive')] %}
     {% if g.retrieval_only %}{% set links = [('archive', 'retrieve_workspace', 'Retrieve files')] %}
     {% else %}
-      {% if current_user.is_admin %}{% set links = links + [('admin', 'admin', 'Admin'), ('upload', 'upload', 'Upload'), ('sandbox', 'fieldview_sandbox', 'Sandbox')] %}
+      {% if current_user.is_admin %}{% set links = links + [('admin', 'admin', 'Admin'), ('upload', 'upload', 'Upload')] %}
         {% if not current_user.platform_owner %}{% set links = links + [('billing', 'billing_portal', 'Billing')] %}{% endif %}
       {% endif %}
+      {% if current_user.platform_owner %}{% set links = links + [('sandbox', 'fieldview_sandbox', 'Sandbox')] %}{% endif %}
       {% if current_user.platform_owner %}{% set links = links + [('owner', 'platform_owner_dashboard', 'Platform Owner')] %}{% endif %}
     {% endif %}
     {% for section, endpoint, label in links %}
