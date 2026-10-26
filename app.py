@@ -149,7 +149,7 @@ app.config.update(
     REMEMBER_COOKIE_HTTPONLY=True,
     REMEMBER_COOKIE_SAMESITE="Lax",
     REMEMBER_COOKIE_SECURE=secure_cookies,
-    MARKETING_SITE_URL=os.environ.get("MARKETING_SITE_URL", "http://127.0.0.1:5173/"),
+    MARKETING_SITE_URL=os.environ.get("MARKETING_SITE_URL", "https://captureiv.com").strip().rstrip("/"),
 )
 if app_env == "production":
     # Production must be reached through the configured reverse proxy. This
@@ -158,6 +158,8 @@ if app_env == "production":
 ENTERPRISE_INQUIRY_EMAIL = os.environ.get("ENTERPRISE_INQUIRY_EMAIL", "").strip()
 STRIPE_API_VERSION = "2026-09-30.endive"
 BILLING_TERMS_VERSION = "2026-10-25"
+ACCOUNT_TERMS_VERSION = "2026-10-25"
+PRIVACY_NOTICE_VERSION = "2026-10-25"
 
 
 def stripe_api_key_is_valid(key=None, environment=None):
@@ -1909,7 +1911,9 @@ def register():
         password = request.form.get("password", "")
         confirm = request.form.get("confirm_password", "")
         plan = db.session.get(SubscriptionPlan, request.form.get("plan_id", type=int))
-        if not company_name or not first or not last or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        if request.form.get("accept_policies") != "yes":
+            flash("Please agree to the Terms and acknowledge the Privacy Policy to create an account.", "error")
+        elif not company_name or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
             flash("Complete the company and contact details with a valid work email.", "error")
         elif len(password) < 12:
             flash("Use a password with at least 12 characters.", "error")
@@ -1927,7 +1931,8 @@ def register():
         else:
             # Registration starts pending. Email verification alone never grants paid access.
             company = Company(name=company_name, status="pending", storage_limit_bytes=plan.storage_limit_bytes)
-            user = User(username=email, email=email, email_verified=False, name=f"{first} {last}", active=False)
+            display_name = " ".join(part for part in (first, last) if part).strip() or email.split("@", 1)[0]
+            user = User(username=email, email=email, email_verified=False, name=display_name, active=False)
             user.set_password(password)
             db.session.add_all([company, user])
             try:
@@ -1947,11 +1952,16 @@ def register():
             token = EmailActionToken(user_id=user.id, token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
                                      purpose="verify_email", expires_at=now_utc() + timedelta(hours=24))
             db.session.add(token)
+            db.session.add(AuditLog(user_id=user.id, action="account_terms_accepted",
+                resource_type="company_registration", resource_id=str(company.id),
+                detail=json.dumps({"terms_version": ACCOUNT_TERMS_VERSION,
+                                   "privacy_notice_version": PRIVACY_NOTICE_VERSION,
+                                   "accepted_at": now_utc().isoformat()})))
             db.session.commit()
             verify_url = absolute_app_url("verify_email", token=raw_token)
             try:
                 delivered = send_account_email(email, "Verify your Capture IV account",
-                    f"Hello {first},\n\nVerify your email within 24 hours: {verify_url}\n\nYour account will remain pending until subscription billing is confirmed.")
+                    f"Hello {display_name},\n\nVerify your email within 24 hours: {verify_url}\n\nYour account will remain pending until subscription billing is confirmed.")
             except Exception:
                 app.logger.exception("Account verification email delivery failed")
                 delivered = False

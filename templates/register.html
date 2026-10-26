@@ -8,7 +8,7 @@
   <form method="post" class="form-stack">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <label>Company name<input name="company_name" autocomplete="organization" maxlength="180" required></label>
-    <div class="saas-name-row"><label>First name<input name="first_name" autocomplete="given-name" maxlength="80" required></label><label>Last name<input name="last_name" autocomplete="family-name" maxlength="80" required></label></div>
+    <div class="saas-name-row"><label>First name (optional)<input name="first_name" autocomplete="given-name" maxlength="80"></label><label>Last name (optional)<input name="last_name" autocomplete="family-name" maxlength="80"></label></div>
     <label>Work email<input type="email" name="email" autocomplete="email" maxlength="254" required></label>
     <label>Plan<select name="plan_id" required>{% for plan in plans %}<option value="{{ plan.id }}" {% if requested_plan == plan.name|lower %}selected{% endif %}>{{ plan.name }} — {% if plan.name == 'Basic' %}$399 / month · 1 project · 2 accounts · 1 TB{% else %}{{ plan.description }}{% endif %}</option>{% endfor %}</select></label>
     <fieldset class="saas-interval"><legend>Billing interval</legend>
@@ -17,8 +17,9 @@
     </fieldset>
     <label>Password<input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
     <label>Confirm password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>
+    <label class="checkout-accept"><input type="checkbox" name="accept_policies" value="yes" required><span>I agree to the <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/terms" target="_blank" rel="noopener">Terms</a> and acknowledge the <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
     <button class="button primary full" {% if not plans %}disabled{% endif %}>Create pending account <span>→</span></button>
   </form>
-  <p class="fineprint">Basic includes one active project, two authenticated company accounts, and 1 TB total storage. No storage add-ons are offered. <a href="{{ config.get('MARKETING_SITE_URL', 'http://127.0.0.1:5173/') }}">Back to Capture IV</a></p>
+  <p class="fineprint">Basic includes one active project, two authenticated company accounts, and 1 TB total storage. No storage add-ons are offered. Only company, work email, and account credentials are required. Name fields are optional. <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/">Back to Capture IV</a></p>
 </section>
 {% endblock %}

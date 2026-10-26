@@ -829,8 +829,12 @@ class TenantIsolationTests(unittest.TestCase):
         registration_data = {
             "_csrf": token, "company_name": "Pending Co", "first_name": "Pat", "last_name": "Example",
             "email": "pat@example.test", "password": "test-password-123", "confirm_password": "test-password-123",
-            "plan_id": str(plan_id), "billing_interval": "monthly",
+            "plan_id": str(plan_id), "billing_interval": "monthly", "accept_policies": "yes",
         }
+        without_consent = dict(registration_data)
+        without_consent.pop("accept_policies")
+        rejected = client.post("/register", data=without_consent)
+        self.assertEqual(rejected.status_code, 400)
         response = client.post("/register", data=registration_data)
         self.assertEqual(response.status_code, 201)
         duplicate = client.post("/register", data=registration_data)
@@ -844,6 +848,10 @@ class TenantIsolationTests(unittest.TestCase):
             self.assertFalse(user.active)
             self.assertEqual(membership.status, "pending")
             self.assertEqual(subscription.status, "pending")
+            consent = portal.AuditLog.query.filter_by(user_id=user.id, action="account_terms_accepted").one()
+            consent_detail = json.loads(consent.detail)
+            self.assertEqual(consent_detail["terms_version"], portal.ACCOUNT_TERMS_VERSION)
+            self.assertEqual(consent_detail["privacy_notice_version"], portal.PRIVACY_NOTICE_VERSION)
             subscription.stripe_price_id_override = "price_live_mode_fixture"
             portal.db.session.commit()
             subscription_id = subscription.id
