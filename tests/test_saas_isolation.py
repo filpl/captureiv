@@ -95,6 +95,29 @@ class TenantIsolationTests(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
 
+    def test_sandbox_is_visible_and_accessible_only_to_platform_owner(self):
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
+
+        company_admin_page = client.get("/admin")
+        self.assertEqual(company_admin_page.status_code, 200)
+        self.assertNotIn(b'fieldview-sandbox', company_admin_page.data)
+        self.assertEqual(client.get("/admin/fieldview-sandbox").status_code, 403)
+
+        with portal.app.app_context():
+            portal.db.session.get(portal.User, self.user_a_id).platform_owner = True
+            portal.db.session.commit()
+        try:
+            owner_page = client.get("/admin")
+            self.assertEqual(owner_page.status_code, 200)
+            self.assertIn(b'fieldview-sandbox', owner_page.data)
+            self.assertEqual(client.get("/admin/fieldview-sandbox").status_code, 200)
+        finally:
+            with portal.app.app_context():
+                portal.db.session.get(portal.User, self.user_a_id).platform_owner = False
+                portal.db.session.commit()
+
     def test_state_changing_post_requires_csrf_token(self):
         response = portal.app.test_client().post("/register", data={
             "company_name": "CSRF regression", "email": "csrf@example.test",
