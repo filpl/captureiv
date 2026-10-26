@@ -21,15 +21,14 @@
   <form method="post" class="form-stack">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <label>Email or username<input name="username" autocomplete="username" required autofocus></label>
-    <label for="login-password">Password
-      <span class="password-input-wrap">
-        <input id="login-password" type="password" name="password" autocomplete="current-password" required>
-        <button class="password-visibility-toggle" type="button" aria-label="Show password" aria-controls="login-password" aria-pressed="false" data-password-visibility-toggle>
-          <svg viewBox="0 0 24 24" aria-hidden="true" data-eye-show><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-          <svg viewBox="0 0 24 24" aria-hidden="true" data-eye-hide hidden><path d="m3 3 18 18"></path><path d="M10.6 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a15 15 0 0 1-3.2 4.2M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7a10 10 0 0 0 3-.5"></path><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"></path></svg>
-        </button>
-      </span>
-    </label>
+    <label for="login-password">Password</label>
+    <span class="password-input-wrap">
+      <input id="login-password" type="password" name="password" autocomplete="current-password" required>
+      <button class="password-visibility-toggle" type="button" aria-label="Show password" aria-controls="login-password" aria-pressed="false" data-password-visibility-toggle>
+        <svg viewBox="0 0 24 24" aria-hidden="true" data-eye-show><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true" data-eye-hide hidden><path d="m3 3 18 18"></path><path d="M10.6 5.2A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a15 15 0 0 1-3.2 4.2M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7a10 10 0 0 0 3-.5"></path><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"></path></svg>
+      </button>
+    </span>
     <button class="button primary full" type="submit">Sign in <span>→</span></button>
   </form>
   <p class="fineprint"><a href="{{ url_for('forgot_password') }}">Forgot password?</a> · <a href="{{ url_for('resend_verification') }}">Resend verification</a><br>Access is limited to authorized project team members. <a href="{{ config['MARKETING_SITE_URL'] }}">Back to Capture IV</a></p>
