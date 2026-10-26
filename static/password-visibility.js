@@ -12,8 +12,8 @@ document.addEventListener("DOMContentLoaded", () => {
       field.type = reveal ? "text" : "password";
       button.setAttribute("aria-pressed", String(reveal));
       button.setAttribute("aria-label", reveal ? "Hide password" : "Show password");
-      showIcon.hidden = reveal;
-      hideIcon.hidden = !reveal;
+      showIcon.hidden = !reveal;
+      hideIcon.hidden = reveal;
     });
   });
 });
