@@ -110,6 +110,15 @@ class R2Storage:
     def object_size(self, key: str) -> int:
         return int(self.client.head_object(Bucket=self.bucket, Key=key)["ContentLength"])
 
+    def read_prefix(self, key: str, size: int = 32) -> bytes:
+        """Read only the initial bytes needed to validate an uploaded container."""
+        response = self.client.get_object(Bucket=self.bucket, Key=key, Range=f"bytes=0-{max(0, size - 1)}")
+        body = response["Body"]
+        try:
+            return body.read(size)
+        finally:
+            body.close()
+
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
 

@@ -109,7 +109,7 @@ class VideoPrivacyReviewTests(unittest.TestCase):
             response.close()
         login=self.client.get('/login').get_data(as_text=True)
         for path in ['/privacy','/billing','/copyright']:self.assertIn(path,login)
-        self.assertIn('HERSHEY CAPITAL LLC',login)
+        self.assertNotIn('HERSHEY CAPITAL LLC',login)
 
 
 if __name__=='__main__':unittest.main()

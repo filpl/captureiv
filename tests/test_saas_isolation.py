@@ -21,6 +21,7 @@ class FakeMultipartStorage:
     def __init__(self):
         self.multipart = {}
         self.objects = {}
+        self.prefixes = {}
 
     def start_multipart(self, key, content_type):
         self.multipart["fake-upload"] = {"key": key, "content_type": content_type, "parts": []}
@@ -35,7 +36,11 @@ class FakeMultipartStorage:
 
     def complete_multipart(self, key, upload_id, parts):
         self.objects[key] = sum(part["Size"] for part in parts)
+        self.prefixes[key] = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"
         self.multipart.pop(upload_id, None)
+
+    def read_prefix(self, key, size=32):
+        return self.prefixes.get(key, b"")[:size]
 
     def object_size(self, key):
         return self.objects[key]
@@ -123,6 +128,64 @@ class TenantIsolationTests(unittest.TestCase):
             "company_name": "CSRF regression", "email": "csrf@example.test",
         })
         self.assertEqual(response.status_code, 400)
+
+    def test_map_default_uses_known_proxy_geography_and_safe_fallback(self):
+        with portal.app.test_request_context("/admin/upload", headers={
+                "CF-IPLatitude": "40.71", "CF-IPLongitude": "-74.01"}):
+            self.assertEqual(portal.request_geo_center(), (40.71, -74.01))
+        with portal.app.test_request_context("/admin/upload"):
+            self.assertEqual(portal.request_geo_center(), (39.8283, -98.5795))
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
+        response = client.get("/admin/site-capture?map_project=A+project", headers={
+            "CF-IPLatitude": "40.71", "CF-IPLongitude": "-74.01",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'data-center-lat="40.71"', response.data)
+        self.assertIn(b'data-center-lng="-74.01"', response.data)
+
+    def test_weekly_project_code_rotation_emails_before_changing_code(self):
+        access_id = None
+        with portal.app.app_context():
+            access = portal.ProjectAccess(
+                company_id=1, project="Weekly code regression", code="WEEK",
+                share_token="weekly-code-regression-token", allow_media=True,
+                client_emails="client@example.test", code_email_message_id="<prior@example.test>",
+                last_code_email_at=portal.now_utc() - timedelta(days=8),
+            )
+            portal.db.session.add(access)
+            portal.db.session.commit()
+            access_id = access.id
+        try:
+            with patch.object(portal, "send_project_access_code_email", return_value="<next@example.test>") as send:
+                result = portal.app.test_cli_runner().invoke(args=["rotate-project-access-codes"])
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertIn("Weekly project codes emailed: 1;", result.output)
+            send.assert_called_once()
+            self.assertEqual(send.call_args.kwargs["previous_message_id"], "<prior@example.test>")
+            with portal.app.app_context():
+                rotated = portal.db.session.get(portal.ProjectAccess, access_id)
+                self.assertNotEqual(rotated.code, "WEEK")
+                self.assertEqual(rotated.code_email_message_id, "<next@example.test>")
+                self.assertIsNotNone(rotated.last_code_email_at)
+                rotated.code = "WEEK"
+                rotated.code_email_message_id = "<next@example.test>"
+                rotated.last_code_email_at = portal.now_utc() - timedelta(days=8)
+                portal.db.session.commit()
+            with patch.object(portal, "send_project_access_code_email", return_value=""):
+                result = portal.app.test_cli_runner().invoke(args=["rotate-project-access-codes"])
+            self.assertEqual(result.exit_code, 0, result.output)
+            with portal.app.app_context():
+                unchanged = portal.db.session.get(portal.ProjectAccess, access_id)
+                self.assertEqual(unchanged.code, "WEEK")
+                self.assertEqual(unchanged.code_email_message_id, "<next@example.test>")
+        finally:
+            with portal.app.app_context():
+                row = portal.db.session.get(portal.ProjectAccess, access_id)
+                if row:
+                    portal.db.session.delete(row)
+                    portal.db.session.commit()
 
     def test_login_attempts_are_rate_limited(self):
         remote_addr = f"192.0.2.{(time.time_ns() % 253) + 1}"
@@ -418,9 +481,7 @@ class TenantIsolationTests(unittest.TestCase):
         unlocked = client.post(f"/share/{token}", data={"_csrf": csrf, "code": access_code, "next_tab": "map"})
         self.assertEqual(unlocked.status_code, 302)
         media_redirect = client.get(unlocked.headers["Location"])
-        self.assertEqual(media_redirect.status_code, 302)
-        self.assertIn("tab=media", media_redirect.headers["Location"])
-        self.assertEqual(client.get(media_redirect.headers["Location"]).status_code, 200)
+        self.assertEqual(media_redirect.status_code, 200)
         self.assertEqual(client.get("/project/OLD1").status_code, 404)
         page = client.get("/admin")
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
@@ -450,7 +511,7 @@ class TenantIsolationTests(unittest.TestCase):
             "_csrf": csrf,
             "date": "2026-10-19", "project": "Unassigned project",
             "directions": ["W-E"], "titles": ["Forbidden upload"],
-            "videos": (BytesIO(b"video"), "forbidden.mp4"),
+            "videos": (BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"), "forbidden.mp4"),
         }, content_type="multipart/form-data")
         self.assertEqual(denied.status_code, 403)
 
@@ -461,7 +522,7 @@ class TenantIsolationTests(unittest.TestCase):
                 "_csrf": csrf,
                 "date": "2026-10-19", "project": "A project",
                 "directions": ["W-E"], "titles": ["Employee upload"],
-                "videos": (BytesIO(b"video"), "employee.mp4"),
+                "videos": (BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"), "employee.mp4"),
             }, content_type="multipart/form-data")
         self.assertEqual(uploaded.status_code, 302)
         with portal.app.app_context():
@@ -522,6 +583,7 @@ class TenantIsolationTests(unittest.TestCase):
 
     def test_workspace_storage_usage_includes_site_and_photo_references(self):
         with portal.app.app_context():
+            before, projects_before = portal.aggregate_company_storage([1, 2])
             portal.db.session.add_all([
                 portal.ProjectSiteMap(company_id=1, project="A project", filename="site-map.png",
                                       original_filename="site-map.png", file_size=75),
@@ -529,13 +591,16 @@ class TenantIsolationTests(unittest.TestCase):
                                              original_filename="photo-ref.png", file_size=25),
             ])
             portal.db.session.commit()
-            self.assertEqual(portal.company_storage_bytes(1), 100)
+            self.assertEqual(portal.company_storage_bytes(1), before[1] + 100)
             totals, by_project = portal.aggregate_company_storage([1, 2])
-            self.assertEqual(totals[1], 100)
-            self.assertEqual(by_project[1]["A project"], 100)
-            self.assertEqual(totals[2], 12)
+            self.assertEqual(totals[1], before[1] + 100)
+            self.assertEqual(by_project[1]["A project"], projects_before[1].get("A project", 0) + 100)
+            self.assertEqual(totals[2], before[2])
+            portal.ProjectSiteMap.query.filter_by(company_id=1, project="A project", filename="site-map.png").delete()
+            portal.ProjectPhotoReference.query.filter_by(company_id=1, project="A project", filename="photo-ref.png").delete()
+            portal.db.session.commit()
 
-    def test_clients_cannot_view_pinned_photos_or_open_map_tabs(self):
+    def test_clients_can_view_site_map_pinned_photos_and_download_project_media(self):
         project, pin_id = "Pinned photo regression", "photo-pin-test-001"
         code = "PHTX"
         with portal.app.app_context():
@@ -566,6 +631,10 @@ class TenantIsolationTests(unittest.TestCase):
             ("pinned-photo-one.jpg", 9, "sha-one", "north-1.jpg", None),
             ("pinned-photo-two.png", 9, "sha-two", "north-2.png", None),
         ]
+        photo_paths = [portal.UPLOAD_DIR / name for name in ("pinned-photo-one.jpg", "pinned-photo-two.png")]
+        for path in photo_paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"test image fixture")
         with patch.object(portal, "save_upload", side_effect=stored), \
                 patch.object(portal, "complete_storage_reservation"):
             uploaded = client.post("/admin/projects/photo-pin-photos", data=uploads,
@@ -588,12 +657,16 @@ class TenantIsolationTests(unittest.TestCase):
         if page.status_code == 302:
             page = viewer.get(page.headers["Location"])
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Project footage", page.data)
-        self.assertNotIn(b"PROJECT_PHOTO_PINS", page.data)
-        self.assertNotIn(b"North facade", page.data)
-        self.assertNotIn(b"/files/pinned-photo-one.jpg", page.data)
-        self.assertEqual(viewer.get(f"/share/{token}?tab=map").status_code, 302)
-        self.assertEqual(viewer.get("/files/pinned-photo-one.jpg").status_code, 403)
+        self.assertIn(b"Map", page.data)
+        self.assertIn(b"Photos", page.data)
+        photo_page = viewer.get(f"/share/{token}?tab=photos")
+        self.assertEqual(photo_page.status_code, 200)
+        self.assertIn(b"North facade", photo_page.data)
+        self.assertIn(b"/files/pinned-photo-one.jpg", photo_page.data)
+        self.assertEqual(viewer.get(f"/share/{token}?tab=map").status_code, 200)
+        photo_file = viewer.get("/files/pinned-photo-one.jpg")
+        self.assertEqual(photo_file.status_code, 200)
+        photo_file.close()
 
         foreign_viewer = portal.app.test_client()
         with foreign_viewer.session_transaction() as state:
@@ -605,6 +678,8 @@ class TenantIsolationTests(unittest.TestCase):
                           portal.ProjectSiteMap, portal.ProjectSiteSetup, portal.ProjectAccess):
                 model.query.filter_by(project=project, company_id=1).delete(synchronize_session=False)
             portal.db.session.commit()
+        for path in photo_paths:
+            path.unlink(missing_ok=True)
 
     def test_platform_owner_can_create_nonbillable_footage_only_demo(self):
         client = portal.app.test_client()
@@ -661,7 +736,8 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(viewer_page.status_code, 200)
         self.assertIn(b"Drone footage", viewer_page.data)
         self.assertNotIn(b"Documents", viewer_page.data)
-        self.assertNotIn(b"Map", viewer_page.data)
+        self.assertIn(b"Map", viewer_page.data)
+        self.assertIn(b"Photos", viewer_page.data)
 
         with portal.app.app_context():
             portal.db.session.add(portal.ProjectFile(company_id=company_id,
@@ -1197,7 +1273,7 @@ class TenantIsolationTests(unittest.TestCase):
             response = client.post("/admin/upload", data={
                 "_csrf": csrf, "date": "2026-10-19", "flight_id": "LOCAL-RESERVATION-TEST",
                 "direction": "W-E", "title": "Local reservation test", "project": "A project",
-                "video": (BytesIO(b"local video test payload"), "reservation-test.mp4"),
+                "video": (BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"), "reservation-test.mp4"),
             }, content_type="multipart/form-data")
         self.assertEqual(response.status_code, 302)
         with portal.app.app_context():

@@ -7,6 +7,7 @@ import mimetypes
 import math
 import time
 from datetime import datetime, date, timedelta
+from io import BytesIO
 from functools import wraps
 from types import SimpleNamespace
 from pathlib import Path
@@ -18,6 +19,7 @@ import hmac
 import smtplib
 import click
 from email.message import EmailMessage
+from email.utils import make_msgid
 
 from flask import (
     Flask, render_template, request, redirect, url_for, flash,
@@ -150,6 +152,7 @@ app.config.update(
     REMEMBER_COOKIE_SAMESITE="Lax",
     REMEMBER_COOKIE_SECURE=secure_cookies,
     MARKETING_SITE_URL=os.environ.get("MARKETING_SITE_URL", "https://captureiv.com").strip().rstrip("/"),
+    GOOGLE_MAPS_API_KEY=os.environ.get("GOOGLE_MAPS_API_KEY", "").strip(),
 )
 if app_env == "production":
     # Production must be reached through the configured reverse proxy. This
@@ -221,6 +224,8 @@ SAAS_BILLING_SCHEMA_REVISION = "0013_refund_review_requests"
 BASIC_PLAN_SCHEMA_REVISION = "0014_basic_plan_entitlements"
 BILLING_PERIOD_START_SCHEMA_REVISION = "0015_subscription_period_start"
 DEMO_WORKSPACE_SCHEMA_REVISION = "0016_nonbillable_demo_workspaces"
+SITE_BOUNDARY_SCHEMA_REVISION = "0017_project_site_boundary"
+PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_PROJECT_LIMIT = 1
 BASIC_ACCOUNT_LIMIT = 2
@@ -284,6 +289,9 @@ class ProjectAccess(db.Model):
     allow_overview = db.Column(db.Boolean, nullable=False, default=False)
     allow_media = db.Column(db.Boolean, nullable=False, default=False)
     allow_documents = db.Column(db.Boolean, nullable=False, default=False)
+    client_emails = db.Column(db.Text, nullable=False, default="")
+    code_email_message_id = db.Column(db.String(255), nullable=False, default="")
+    last_code_email_at = db.Column(db.DateTime, nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)
     revoked_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
@@ -345,6 +353,7 @@ class ProjectSiteSetup(db.Model):
     center_lng = db.Column(db.Float, nullable=True)
     zoom = db.Column(db.Integer, default=16)
     locked = db.Column(db.Boolean, default=True, nullable=False)
+    boundary_json = db.Column(db.Text, nullable=False, default="[]")
     updated_at = db.Column(db.DateTime, default=now_utc, onupdate=now_utc, nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
     __table_args__ = (db.UniqueConstraint("company_id", "project", name="uq_project_site_setup_company_project"),)
@@ -996,6 +1005,28 @@ def ext_allowed(filename, allowed):
     return bool(filename and "." in filename and filename.rsplit(".", 1)[1].lower() in allowed)
 
 
+def video_signature_valid(stream, filename):
+    """Require supported media container headers before saving uploaded files."""
+    ext = extension(filename)
+    try:
+        position = stream.tell()
+        header = stream.read(32)
+        stream.seek(position)
+    except (AttributeError, OSError, ValueError):
+        return False
+    if ext in {"mp4", "m4v", "mov"}:
+        return len(header) >= 12 and header[4:8] == b"ftyp"
+    if ext == "webm":
+        return header.startswith(b"\x1a\x45\xdf\xa3")
+    if ext == "avi":
+        return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"AVI "
+    return False
+
+
+def video_signature_valid_bytes(header, filename):
+    return video_signature_valid(BytesIO(header or b""), filename)
+
+
 def extension(filename):
     return Path(filename).suffix.lower().lstrip(".")
 
@@ -1314,6 +1345,53 @@ def viewer_access_active(access):
                 and (not access.expires_at or access.expires_at > now_utc()))
 
 
+def normalize_client_emails(value):
+    recipients = []
+    for entry in re.split(r"[\s,;]+", str(value or "").strip()):
+        email = entry.strip().lower()
+        if not email:
+            continue
+        if not re.fullmatch(r"[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+", email):
+            raise ValueError("Enter valid client email addresses separated by commas or new lines.")
+        if email not in recipients:
+            recipients.append(email)
+    if len(recipients) > 30:
+        raise ValueError("A project can have at most 30 client email recipients.")
+    return recipients
+
+
+def send_project_access_code_email(access, recipients, code, *, previous_message_id=""):
+    """Send the new project code as a threaded message to configured recipients."""
+    if not recipients:
+        return None
+    host = os.environ.get("SMTP_HOST", "").strip()
+    if not host:
+        return None
+    origin = app.config.get("PUBLIC_APP_URL", "").rstrip("/") or "https://app.captureiv.com"
+    message = EmailMessage()
+    message["Subject"] = f"Weekly project access code — {access.project}"
+    message["From"] = os.environ.get("MAIL_FROM", "Capture IV <no-reply@captureiv.com>")
+    message["To"] = "undisclosed-recipients:;"
+    message["Bcc"] = ", ".join(recipients)
+    message["Message-ID"] = make_msgid(domain="captureiv.com")
+    if previous_message_id:
+        message["In-Reply-To"] = previous_message_id
+        message["References"] = previous_message_id
+    message.set_content(
+        f"Your weekly access code for {access.project} is {code}.\n\n"
+        f"Open the project link and enter this code: {origin}/share/{access.share_token}\n\n"
+        "This code changes weekly. This message is part of your existing project-access email thread. "
+        "If you did not expect this message, contact your project administrator."
+    )
+    with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587")), timeout=15) as server:
+        server.starttls()
+        username, password = os.environ.get("SMTP_USERNAME", ""), os.environ.get("SMTP_PASSWORD", "")
+        if username:
+            server.login(username, password)
+        server.send_message(message)
+    return message["Message-ID"]
+
+
 def parse_datetime(value):
     if not value:
         return None
@@ -1323,6 +1401,25 @@ def parse_datetime(value):
         except ValueError:
             pass
     return None
+
+
+def request_geo_center():
+    """Read coarse coordinates only when the trusted hosting edge supplies them."""
+    candidates = [
+        (request.headers.get("CF-IPLatitude"), request.headers.get("CF-IPLongitude")),
+        (request.headers.get("X-Vercel-IP-Latitude"), request.headers.get("X-Vercel-IP-Longitude")),
+    ]
+    city_pair = request.headers.get("X-AppEngine-CityLatLong", "").split(",", 1)
+    if len(city_pair) == 2:
+        candidates.append((city_pair[0], city_pair[1]))
+    for raw_lat, raw_lng in candidates:
+        try:
+            lat, lng = float(raw_lat), float(raw_lng)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180:
+            return lat, lng
+    return 39.8283, -98.5795
 
 
 def audit(action, resource_type="", resource_id="", detail=""):
@@ -1361,7 +1458,9 @@ def migrate_sqlite():
                             SchemaMigration(revision=PINNED_PHOTO_SCHEMA_REVISION),
                             SchemaMigration(revision=SAAS_BILLING_SCHEMA_REVISION),
                             SchemaMigration(revision=BILLING_PERIOD_START_SCHEMA_REVISION),
-                            SchemaMigration(revision=DEMO_WORKSPACE_SCHEMA_REVISION)])
+                            SchemaMigration(revision=DEMO_WORKSPACE_SCHEMA_REVISION),
+                            SchemaMigration(revision=SITE_BOUNDARY_SCHEMA_REVISION),
+                            SchemaMigration(revision=PROJECT_CODE_EMAIL_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1379,6 +1478,8 @@ def migrate_sqlite():
         apply_saas_billing_migration()
         apply_billing_period_start_migration()
         apply_demo_workspace_schema_migration()
+        apply_site_boundary_migration()
+        apply_project_code_email_migration()
         return
 
     timestamp_type = migration_timestamp_type()
@@ -1403,11 +1504,14 @@ def migrate_sqlite():
             "checksum_sha256": "VARCHAR(64)", "download_count": "INTEGER",
         },
         "project_access": {"company_id": "INTEGER", "allow_overview": bool_false,
-                           "allow_media": bool_false, "allow_documents": bool_false},
+                           "allow_media": bool_false, "allow_documents": bool_false,
+                           "client_emails": "TEXT NOT NULL DEFAULT ''",
+                           "code_email_message_id": "VARCHAR(255) NOT NULL DEFAULT ''",
+                           "last_code_email_at": timestamp_type},
         "project_site_map": {"company_id": "INTEGER", "file_size": "BIGINT NOT NULL DEFAULT 0"},
         "project_photo_reference": {"company_id": "INTEGER", "file_size": "BIGINT NOT NULL DEFAULT 0"},
         "project_photo_annotation": {"company_id": "INTEGER"},
-        "project_site_setup": {"company_id": "INTEGER"},
+        "project_site_setup": {"company_id": "INTEGER", "boundary_json": "TEXT NOT NULL DEFAULT '[]'"},
         "project_flight_path": {"company_id": "INTEGER"},
         "project_map_pin": {"company_id": "INTEGER"},
         "company_subscription": {"stripe_event_created": "BIGINT NOT NULL DEFAULT 0"},
@@ -1478,6 +1582,8 @@ def migrate_sqlite():
     apply_pinned_photo_migration()
     apply_saas_billing_migration()
     apply_billing_period_start_migration()
+    apply_site_boundary_migration()
+    apply_project_code_email_migration()
 
 
 def apply_enterprise_schema_migration():
@@ -1697,6 +1803,35 @@ def apply_demo_workspace_schema_migration():
     db.session.commit()
 
 
+def apply_site_boundary_migration():
+    """Store a company-specific polygon for the project map boundary."""
+    if db.session.get(SchemaMigration, SITE_BOUNDARY_SCHEMA_REVISION):
+        return
+    if "project_site_setup" in set(inspect(db.engine).get_table_names()):
+        columns = {column["name"] for column in inspect(db.engine).get_columns("project_site_setup")}
+        if "boundary_json" not in columns:
+            db.session.execute(text(
+                'ALTER TABLE "project_site_setup" ADD COLUMN "boundary_json" TEXT NOT NULL DEFAULT \'[]\''
+            ))
+    db.session.add(SchemaMigration(revision=SITE_BOUNDARY_SCHEMA_REVISION))
+    db.session.commit()
+
+
+def apply_project_code_email_migration():
+    """Persist client code recipients and weekly email threading state."""
+    if db.session.get(SchemaMigration, PROJECT_CODE_EMAIL_SCHEMA_REVISION):
+        return
+    if "project_access" in set(inspect(db.engine).get_table_names()):
+        columns = {column["name"] for column in inspect(db.engine).get_columns("project_access")}
+        for name, sql_type in (("client_emails", "TEXT NOT NULL DEFAULT ''"),
+                               ("code_email_message_id", "VARCHAR(255) NOT NULL DEFAULT ''"),
+                               ("last_code_email_at", migration_timestamp_type())):
+            if name not in columns:
+                db.session.execute(text(f'ALTER TABLE "project_access" ADD COLUMN "{name}" {sql_type}'))
+    db.session.add(SchemaMigration(revision=PROJECT_CODE_EMAIL_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_basic_plan_defaults():
     """Apply the approved Basic entitlements once, without touching Enterprise."""
     if db.session.get(SchemaMigration, BASIC_PLAN_SCHEMA_REVISION):
@@ -1804,6 +1939,7 @@ def render_project_view(access):
     map_pins = ProjectMapPin.query.filter_by(project=access.project, company_id=access.company_id).order_by(ProjectMapPin.id).all()
     map_pin_data = [{"x": pin.x_percent, "y": pin.y_percent, "label": pin.label, "direction": pin.direction} for pin in map_pins]
     photo_pin_data = []
+    photo_area_data = []
     if company_feature_enabled("photos", access.company_id):
         annotation_row = ProjectPhotoAnnotation.query.filter_by(project=access.project,
                                                                  company_id=access.company_id).first()
@@ -1811,6 +1947,22 @@ def render_project_view(access):
             annotations = json.loads(annotation_row.data) if annotation_row else {}
         except (TypeError, json.JSONDecodeError):
             annotations = {}
+        for area in annotations.get("areas", []) if isinstance(annotations, dict) else []:
+            if not isinstance(area, dict) or not isinstance(area.get("points"), list):
+                continue
+            points = []
+            try:
+                for point in area["points"]:
+                    if not isinstance(point, (list, tuple)) or len(point) != 2:
+                        raise ValueError
+                    x, y = float(point[0]), float(point[1])
+                    if not (math.isfinite(x) and math.isfinite(y) and 0 <= x <= 1000 and 0 <= y <= 620):
+                        raise ValueError
+                    points.append([x, y])
+            except (TypeError, ValueError):
+                continue
+            if len(points) >= 3:
+                photo_area_data.append({"label": str(area.get("label") or "Site area")[:80], "points": points})
         assets = ProjectPinnedPhoto.query.filter_by(project=access.project,
                                                      company_id=access.company_id).order_by(ProjectPinnedPhoto.id).all()
         by_pin = {}
@@ -1846,9 +1998,15 @@ def render_project_view(access):
     selected_id = request.args.get("flight", type=int)
     selected_flight = next((f for f in day_flights if f.id == selected_id), None) or (day_flights[0] if day_flights else None)
     tab = request.args.get("tab", "media")
-    # Project-code viewers are deliberately footage-only. Company accounts
-    # manage maps, documents, and project settings in their authenticated area.
-    permissions = {"media"} if access.allow_media else set()
+    # Client access permits viewing and downloading assigned media and site maps.
+    # It never grants document, account, billing, or editing access.
+    permissions = set()
+    if access.allow_media:
+        permissions.add("media")
+        if company_feature_enabled("site_maps", access.company_id):
+            permissions.add("map")
+        if company_feature_enabled("photos", access.company_id):
+            permissions.add("photos")
     if tab not in permissions:
         if not permissions:
             abort(403)
@@ -1858,7 +2016,10 @@ def render_project_view(access):
                            selected_date=selected_date, selected_flight=selected_flight, tab=tab,
                            site_map=site_map, photo_reference=photo_reference, site_reference=site_reference,
                            map_pins=map_pins, map_pin_data=map_pin_data, photo_pin_data=photo_pin_data,
-                           site_setup=site_setup, flight_paths=flight_path_data)
+                           photo_area_data=photo_area_data,
+                           site_setup=site_setup, flight_paths=flight_path_data,
+                           google_maps_api_key=app.config.get("GOOGLE_MAPS_API_KEY", ""),
+                           map_default_center=request_geo_center())
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -3600,9 +3761,11 @@ def protected_file(filename):
             abort(403)
         if flight_record and not company_feature_enabled("flight_scans", access.company_id):
             abort(403)
-        # Client codes expose only drone footage. Even if a client guesses a
-        # media URL, code-based access cannot retrieve docs, maps, or photos.
-        if any((document_record, map_record, photo_record, pinned_photo_record)):
+        if document_record:
+            abort(403)
+        if map_record and not company_feature_enabled("site_maps", access.company_id):
+            abort(403)
+        if any((photo_record, pinned_photo_record)) and not company_feature_enabled("photos", access.company_id):
             abort(403)
     path = UPLOAD_DIR / safe
     if not is_r2_filename(safe) and (not path.exists() or not path.is_file()):
@@ -3693,6 +3856,8 @@ def admin():
                            features={key: company_feature_enabled(key) for key in PLAN_FEATURES},
                            current_time=now_utc(),
                            r2_multipart_enabled=cloud_storage_enabled(),
+                           google_maps_api_key=app.config.get("GOOGLE_MAPS_API_KEY", ""),
+                           map_default_center=request_geo_center(),
                            local_employee_invite_url=session.pop("local_employee_invite_url", ""))
 
 
@@ -3897,7 +4062,13 @@ def create_project_access():
     if raw_expiration and not expiration_date:
         flash("Choose a valid viewer-link expiration date.", "error")
         return redirect(url_for("admin") + "#project-access")
+    try:
+        recipients = normalize_client_emails(request.form.get("client_emails", ""))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin") + "#project-access")
     access = ProjectAccess.query.filter_by(project=project).first()
+    previous_message_id = access.code_email_message_id if access else ""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
     for _ in range(100):
         code = "".join(secrets.choice(alphabet) for _ in range(4))
@@ -3917,9 +4088,24 @@ def create_project_access():
     access.allow_overview = False
     access.allow_media = True
     access.allow_documents = False
+    access.client_emails = ",".join(recipients)
+    if recipients:
+        try:
+            db.session.flush()
+            message_id = send_project_access_code_email(access, recipients, code,
+                                                        previous_message_id=previous_message_id)
+            if not message_id:
+                raise RuntimeError("Email is not configured, so the access code was not changed. Configure SMTP first.")
+            access.code_email_message_id = message_id
+            access.last_code_email_at = now_utc()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.exception("Could not send project access code email")
+            flash(f"Access code was not changed because its email could not be sent: {exc}", "error")
+            return redirect(url_for("admin") + "#project-access")
     db.session.commit()
     audit("project_access", "project", project, "Generated or rotated a four-character viewer code")
-    flash(f"Viewer access updated for {project}.", "success")
+    flash(f"Viewer access updated for {project}." + (" Code emailed to the saved client addresses." if recipients else " Add client email addresses to enable weekly code emails."), "success")
     return redirect(url_for("admin") + "#project-access")
 
 
@@ -3934,6 +4120,56 @@ def revoke_project_access(access_id):
         audit("project_access_revoked", "project", access.project, "Revoked public viewer access")
     flash(f"Viewer access revoked for {access.project}.", "success")
     return redirect(url_for("admin") + "#project-access")
+
+
+@app.cli.command("rotate-project-access-codes")
+def rotate_project_access_codes():
+    """Email weekly access-code updates; only rotate a code after successful delivery."""
+    now = now_utc()
+    cutoff = now - timedelta(days=7)
+    due = ProjectAccess.query.filter(
+        ProjectAccess.revoked_at.is_(None),
+        or_(ProjectAccess.expires_at.is_(None), ProjectAccess.expires_at > now),
+        ProjectAccess.client_emails != "",
+        or_(ProjectAccess.last_code_email_at.is_(None), ProjectAccess.last_code_email_at <= cutoff),
+    ).all()
+    sent = skipped = 0
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    for access in due:
+        try:
+            recipients = normalize_client_emails(access.client_emails)
+        except ValueError:
+            app.logger.warning("Skipping weekly project-code email for access %s with invalid recipients", access.id)
+            skipped += 1
+            continue
+        candidate = None
+        for _ in range(100):
+            attempt = "".join(secrets.choice(alphabet) for _ in range(4))
+            if not ProjectAccess.query.filter(ProjectAccess.code == attempt,
+                                              ProjectAccess.id != access.id).first():
+                candidate = attempt
+                break
+        if not candidate:
+            skipped += 1
+            continue
+        try:
+            message_id = send_project_access_code_email(
+                access, recipients, candidate, previous_message_id=access.code_email_message_id or "")
+            if not message_id:
+                skipped += 1
+                continue
+            access.code = candidate
+            access.code_email_message_id = message_id
+            access.last_code_email_at = now
+            db.session.commit()
+            audit("project_access_code_emailed", "project", access.project,
+                  f"Sent weekly code update to {len(recipients)} configured client recipient(s)")
+            sent += 1
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Weekly access-code email failed for access %s", access.id)
+            skipped += 1
+    click.echo(f"Weekly project codes emailed: {sent}; skipped: {skipped}.")
 
 
 @app.route("/admin/upload", methods=["GET", "POST"])
@@ -3979,6 +4215,9 @@ def upload():
             return redirect(url_for("upload"))
         if not ext_allowed(video.filename, ALLOWED_VIDEO):
             flash("Allowed video types: MP4, MOV, M4V, WEBM, AVI.", "error")
+            return redirect(url_for("upload"))
+        if not video_signature_valid(video.stream, video.filename):
+            flash("The selected file does not match a supported video format.", "error")
             return redirect(url_for("upload"))
         if Flight.query.filter_by(flight_id=flight_id).first():
             flash("That Flight ID already exists.", "error")
@@ -4059,6 +4298,9 @@ def upload_batch():
     failed = 0
     for index, (video, direction) in enumerate(zip(videos, directions)):
         if not video or not video.filename or not ext_allowed(video.filename, ALLOWED_VIDEO):
+            failed += 1
+            continue
+        if not video_signature_valid(video.stream, video.filename):
             failed += 1
             continue
         stored = None
@@ -4289,6 +4531,11 @@ def complete_r2_upload(upload_id):
         storage.complete_multipart(transfer.object_key, transfer.multipart_upload_id, parts)
         if storage.object_size(object_key) != transfer.file_size:
             raise ValueError("R2 object size does not match the reserved upload size")
+        if not video_signature_valid_bytes(storage.read_prefix(object_key), transfer.original_filename):
+            storage.delete(object_key)
+            transfer.status = "failed"
+            db.session.commit()
+            return jsonify({"error": "The selected file does not match a supported video format."}), 400
         if not project_capacity_available(transfer.project):
             raise ValueError("The project limit for this plan has been reached")
         stem = Path(transfer.original_filename).stem
@@ -4363,6 +4610,8 @@ def upload_route_video():
     direction = request.form.get("direction", "Custom path").strip()[:40]
     if not project or not date_value or not video or not video.filename or not ext_allowed(video.filename, ALLOWED_VIDEO):
         return jsonify({"error": "Choose a valid project date and an MP4, MOV, M4V, WEBM, or AVI video."}), 400
+    if not video_signature_valid(video.stream, video.filename):
+        return jsonify({"error": "The selected file does not match a supported video format."}), 400
     if not project_capacity_available(project):
         return jsonify({"error": "The project limit for this plan has been reached."}), 403
     stored = None
@@ -4460,6 +4709,24 @@ def save_project_site_setup():
     address = request.form.get("address", "").strip()[:300]
     if not project or module not in {"map", "image", "ortho"}:
         abort(400, "Choose a project and a valid reference type")
+    try:
+        boundary = json.loads(request.form.get("boundary_json", "[]"))
+    except (TypeError, json.JSONDecodeError):
+        abort(400, "Invalid project boundary")
+    if not isinstance(boundary, list) or (boundary and not 3 <= len(boundary) <= 1000):
+        abort(400, "A site boundary needs at least three points")
+    normalized_boundary = []
+    for point in boundary:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            abort(400, "Invalid project boundary point")
+        try:
+            point_lat, point_lng = float(point[0]), float(point[1])
+        except (TypeError, ValueError):
+            abort(400, "Invalid project boundary point")
+        if not (math.isfinite(point_lat) and -90 <= point_lat <= 90
+                and math.isfinite(point_lng) and -180 <= point_lng <= 180):
+            abort(400, "Project boundary coordinates are outside the valid map range")
+        normalized_boundary.append([point_lat, point_lng])
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
         return redirect(f"/admin/upload?map_project={quote(project)}#videos")
@@ -4481,6 +4748,7 @@ def save_project_site_setup():
         setup.center_lat, setup.center_lng = lat, lng
     setup.zoom = max(2, min(20, zoom))
     setup.locked = True
+    setup.boundary_json = json.dumps(normalized_boundary)
     db.session.commit()
     audit("site_setup", "project", project, f"Saved {module} site reference")
     flash("Project site setup saved.", "success")

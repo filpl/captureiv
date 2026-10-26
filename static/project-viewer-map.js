@@ -1,7 +1,7 @@
 (()=>{
   const root=document.querySelector('#viewer-site-map');if(!root||!window.L)return;
   const $=s=>document.querySelector(s),module=root.dataset.module||'map',date=root.dataset.date;
-  const map=L.map('viewer-live-map',{zoomControl:true,scrollWheelZoom:true}).setView([Number(root.dataset.centerLat)||40.2744,Number(root.dataset.centerLng)||-76.8871],Number(root.dataset.zoom)||16);
+  const map=L.map('viewer-live-map',{zoomControl:true,scrollWheelZoom:true}).setView([Number(root.dataset.centerLat)||39.8283,Number(root.dataset.centerLng)||-98.5795],Number(root.dataset.zoom)||4);
   map.createPane('basemapPane');map.getPane('basemapPane').style.zIndex=200;map.createPane('referencePane');map.getPane('referencePane').style.zIndex=250;
   const streets=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,attribution:'© OpenStreetMap contributors',pane:'basemapPane'}).addTo(map);
   const satellite=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri',pane:'basemapPane'});
@@ -24,6 +24,10 @@
   });
   if(module==='image'&&imageBounds){(window.PROJECT_MAP_PINS||[]).forEach(pin=>{const lat=imageBounds.getNorth()-(imageBounds.getNorth()-imageBounds.getSouth())*Number(pin.y)/100,lng=imageBounds.getWest()+(imageBounds.getEast()-imageBounds.getWest())*Number(pin.x)/100;L.marker([lat,lng],{icon:L.divIcon({className:'viewer-photo-pin',html:`<span>${String(pin.direction||'•').replace(/[&<>"']/g,'')}</span>`,iconSize:[32,32],iconAnchor:[16,16]})}).addTo(map).bindTooltip(pin.label||pin.direction)})}
   if(module==='image'&&imageBounds){
+    (window.PROJECT_PHOTO_AREAS||[]).forEach(area=>{
+      const points=(area.points||[]).map(point=>[imageBounds.getNorth()-(imageBounds.getNorth()-imageBounds.getSouth())*Number(point[1])/620,imageBounds.getWest()+(imageBounds.getEast()-imageBounds.getWest())*Number(point[0])/1000]);
+      if(points.length>=3)L.polygon(points,{color:'#d5683b',weight:2,fillColor:'#e98a55',fillOpacity:.2}).addTo(map).bindTooltip(String(area.label||'Site area'));
+    });
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     (window.PROJECT_PHOTO_PINS||[]).forEach(pin=>{
       const x=Number(pin.x),y=Number(pin.y);if(!Number.isFinite(x)||!Number.isFinite(y))return;
@@ -34,6 +38,7 @@
       marker.bindPopup(`<div class="viewer-photo-popup"><strong>${escapeHTML(pin.label||'Site photos')}</strong>${gallery}</div>`,{maxWidth:300});
     });
   }
+  try{const boundary=JSON.parse(root.dataset.boundary||'[]');if(Array.isArray(boundary)&&boundary.length>=3){const polygon=L.polygon(boundary,{color:'#d5683b',weight:3,fillColor:'#e98a55',fillOpacity:.12}).addTo(map);map.fitBounds(polygon.getBounds(),{padding:[20,20],maxZoom:18})}}catch{}
   if(module==='ortho'&&root.dataset.orthoUrl){map.getPane('basemapPane').style.visibility='hidden';fetch(root.dataset.orthoUrl).then(r=>{if(!r.ok)throw Error('Orthomosaic unavailable');return r.arrayBuffer()}).then(bytes=>window.parseGeoraster(bytes)).then(georaster=>{const raster=new window.GeoRasterLayer({georaster,resolution:256,pane:'referencePane'}).addTo(map);const b=raster.getBounds();if(b?.isValid())map.fitBounds(b,{padding:[12,12],maxZoom:20})}).catch(()=>{$('#viewer-map-empty').textContent='This orthomosaic could not be loaded.';$('#viewer-map-empty').hidden=false})}
   if(module==='ortho'&&!root.dataset.orthoUrl){map.getPane('basemapPane').style.visibility='hidden';$('#viewer-map-empty').hidden=false}
   map.whenReady(()=>setTimeout(()=>map.invalidateSize(),100));window.addEventListener('resize',()=>map.invalidateSize());
