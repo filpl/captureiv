@@ -3697,7 +3697,7 @@ def admin():
 
 
 @app.get("/admin/fieldview-sandbox")
-@admin_required
+@platform_owner_required
 def fieldview_sandbox():
     """Open the standalone interactive site-capture sandbox."""
     return render_template("fieldview_sandbox.html")
