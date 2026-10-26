@@ -7,10 +7,11 @@
   <link rel="preconnect" href="https://unpkg.com">
   <link rel="preconnect" href="https://tile.openstreetmap.org">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="/static/fieldview-sandbox/style.css?v=privacy-fonts-6">
+  <link rel="stylesheet" href="/static/fieldview-sandbox/style.css?v=privacy-fonts-7">
 <link rel="stylesheet" href="{{ url_for('static', filename='navigation.css') }}?v=20261025-privacy">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   {% include "_topbar.html" %}
 
   <div class="app-shell">
@@ -24,7 +25,7 @@
       <div class="sidebar-foot"><div class="help-mark">?</div><span><strong>Need a hand?</strong><small>View the site capture guide</small></span><span class="side-chevron">›</span></div>
     </aside>
 
-    <main class="main-content">
+    <main id="main-content" class="main-content">
       <div class="breadcrumb"><span>Administration</span><b>/</b><strong>Site overview map &amp; directions</strong></div>
       <div class="page-title-row"><div><p class="eyebrow">SITE CAPTURE</p><h1>Site overview map &amp; directions</h1><p class="subtitle">Set up the visual reference viewers will use to explore your project.</p></div><button id="previewButton" class="button outline">◉ <span>Viewer preview</span></button></div>
       <section class="module-picker" aria-labelledby="moduleHeading"><div class="module-picker-heading"><div><p class="eyebrow">PROJECT REFERENCE</p><h2 id="moduleHeading">Choose how this project is mapped</h2></div><span class="module-helper">You can switch later. Route tools work the same in every module.</span></div><div class="module-options"><button class="module-option selected" data-module="map" aria-pressed="true"><span class="module-icon">⌖</span><span><strong>Map</strong><small>Interactive street or satellite map</small></span><span class="module-check">✓</span></button><button class="module-option" data-module="image" aria-pressed="false"><span class="module-icon">▧</span><span><strong>Site image</strong><small>Use a JPG, PNG, or WebP as the site background</small></span><span class="module-check">✓</span></button><button class="module-option" data-module="ortho" aria-pressed="false"><span class="module-icon">▦</span><span><strong>Orthomosaic</strong><small>Use a georeferenced GeoTIFF or COG</small></span><span class="module-check">✓</span></button></div></section>
