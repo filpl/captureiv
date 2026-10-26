@@ -220,6 +220,7 @@ PINNED_PHOTO_SCHEMA_REVISION = "0012_pinned_photo_assets"
 SAAS_BILLING_SCHEMA_REVISION = "0013_refund_review_requests"
 BASIC_PLAN_SCHEMA_REVISION = "0014_basic_plan_entitlements"
 BILLING_PERIOD_START_SCHEMA_REVISION = "0015_subscription_period_start"
+DEMO_WORKSPACE_SCHEMA_REVISION = "0016_nonbillable_demo_workspaces"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_PROJECT_LIMIT = 1
 BASIC_ACCOUNT_LIMIT = 2
@@ -452,6 +453,7 @@ class Company(db.Model):
     storage_limit_override_bytes = db.Column(db.BigInteger, nullable=True)
     project_limit = db.Column(db.Integer, nullable=True)
     employee_limit = db.Column(db.Integer, nullable=True)
+    is_demo = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
 
 
@@ -1358,7 +1360,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=PLAN_FEATURE_SCHEMA_REVISION),
                             SchemaMigration(revision=PINNED_PHOTO_SCHEMA_REVISION),
                             SchemaMigration(revision=SAAS_BILLING_SCHEMA_REVISION),
-                            SchemaMigration(revision=BILLING_PERIOD_START_SCHEMA_REVISION)])
+                            SchemaMigration(revision=BILLING_PERIOD_START_SCHEMA_REVISION),
+                            SchemaMigration(revision=DEMO_WORKSPACE_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1375,6 +1378,7 @@ def migrate_sqlite():
         apply_pinned_photo_migration()
         apply_saas_billing_migration()
         apply_billing_period_start_migration()
+        apply_demo_workspace_schema_migration()
         return
 
     timestamp_type = migration_timestamp_type()
@@ -1407,6 +1411,7 @@ def migrate_sqlite():
         "project_flight_path": {"company_id": "INTEGER"},
         "project_map_pin": {"company_id": "INTEGER"},
         "company_subscription": {"stripe_event_created": "BIGINT NOT NULL DEFAULT 0"},
+        "company": {"is_demo": bool_false},
     }
     for table, columns in expected.items():
         if table not in existing_tables:
@@ -1468,6 +1473,7 @@ def migrate_sqlite():
     apply_storage_reservation_schema_migration()
     apply_company_limit_override_migration()
     apply_scheduled_cancellation_migration()
+    apply_demo_workspace_schema_migration()
     apply_plan_feature_migration()
     apply_pinned_photo_migration()
     apply_saas_billing_migration()
@@ -1677,6 +1683,20 @@ def apply_billing_period_start_migration():
     db.session.commit()
 
 
+def apply_demo_workspace_schema_migration():
+    """Mark the explicitly provisioned, non-billable demonstration tenant."""
+    if db.session.get(SchemaMigration, DEMO_WORKSPACE_SCHEMA_REVISION):
+        return
+    columns = {column["name"] for column in inspect(db.engine).get_columns("company")}
+    if "is_demo" not in columns:
+        db.session.execute(text(
+            'ALTER TABLE "company" ADD COLUMN "is_demo" '
+            + migration_boolean_column(default=False)
+        ))
+    db.session.add(SchemaMigration(revision=DEMO_WORKSPACE_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_basic_plan_defaults():
     """Apply the approved Basic entitlements once, without touching Enterprise."""
     if db.session.get(SchemaMigration, BASIC_PLAN_SCHEMA_REVISION):
@@ -1825,19 +1845,14 @@ def render_project_view(access):
                                  "flight_id": path.flight_id, "flight_title": path.flight.title if path.flight else ""})
     selected_id = request.args.get("flight", type=int)
     selected_flight = next((f for f in day_flights if f.id == selected_id), None) or (day_flights[0] if day_flights else None)
-    tab = request.args.get("tab", "map")
-    permissions = {"map", "overview", "timeline", "media", "documents"}
-    if not access.allow_overview:
-        permissions.discard("overview")
-        permissions.discard("timeline")
-    if not access.allow_media:
-        permissions.discard("media")
-    if not access.allow_documents:
-        permissions.discard("documents")
-    if not company_feature_enabled("documents", access.company_id):
-        permissions.discard("documents")
+    tab = request.args.get("tab", "media")
+    # Project-code viewers are deliberately footage-only. Company accounts
+    # manage maps, documents, and project settings in their authenticated area.
+    permissions = {"media"} if access.allow_media else set()
     if tab not in permissions:
-        return redirect(url_for("shared_project", token=token, tab="map"))
+        if not permissions:
+            abort(403)
+        return redirect(url_for("shared_project", token=token, tab="media"))
     return render_template("project_view.html", project=access.project, code=access.code, share_token=token,
                            flights=flights, day_flights=day_flights, dates=dates, docs=docs,
                            selected_date=selected_date, selected_flight=selected_flight, tab=tab,
@@ -2771,6 +2786,11 @@ def platform_owner_dashboard():
         and (subscription := subscriptions.get(membership.company_id))
         and subscription.status == "pending" and subscription.plan and subscription.plan.custom_pricing
     }
+    pending_demo_admins = {
+        membership.company_id: membership.user
+        for membership in CompanyMembership.query.filter_by(role="company_admin", status="pending").all()
+        if membership.company.is_demo and not membership.user.email_verified
+    }
     usage, usage_by_project = aggregate_company_storage(company.id for company in companies)
     storage_limits = {}
     for company in companies:
@@ -2842,6 +2862,8 @@ def platform_owner_dashboard():
                            enterprise_requests=requests, refund_requests=refund_requests,
                            subscriptions=subscriptions, usage=usage,
                            pending_admins=pending_admins,
+                           pending_demo_admins=pending_demo_admins,
+                           demo_workspace_result=session.pop("demo_workspace_result", None),
                            storage_limits=storage_limits, usage_by_project=usage_by_project,
                            storage_warning_levels=storage_warning_levels,
                            near_storage_limit=near_storage_limit,
@@ -2969,6 +2991,173 @@ def create_owner_company():
         flash("Workspace created pending billing, but the setup email could not be delivered. Configure SMTP and resend from the request record.", "error")
     audit("company_manually_provisioned", "company", company.id,
           "Enterprise workspace created; pending verified Stripe confirmation")
+    return redirect(url_for("platform_owner_dashboard"))
+
+
+@app.post("/owner/demo-workspace/create")
+@platform_owner_required
+def create_demo_workspace():
+    """Create one tightly limited demo tenant without creating Stripe billing."""
+    company_name = request.form.get("company_name", "").strip()[:180]
+    project_name = request.form.get("project_name", "").strip()[:160]
+    admin_email = request.form.get("admin_email", "").strip().lower()[:254]
+    if (not company_name or not project_name
+            or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", admin_email)):
+        flash("Enter the demo company, project, and a valid company-admin email.", "error")
+        return redirect(url_for("platform_owner_dashboard"))
+    if Company.query.filter_by(name=company_name).first():
+        flash("A company with that name already exists. Choose a distinct demo name or review the existing workspace.", "error")
+        return redirect(url_for("platform_owner_dashboard"))
+    if User.query.filter(or_(User.username == admin_email, User.email == admin_email)).first():
+        flash("That email already has a platform account. Use a different company-admin email.", "error")
+        return redirect(url_for("platform_owner_dashboard"))
+
+    plan_name = "Demo - Non-billable"
+    plan = SubscriptionPlan.query.filter_by(name=plan_name).first()
+    if not plan:
+        plan = SubscriptionPlan(
+            name=plan_name,
+            description="Private demonstration workspace. No Stripe customer, subscription, or payment is created.",
+            monthly_amount_cents=0,
+            project_limit=1,
+            employee_limit=2,
+            storage_limit_bytes=1024 ** 3,
+            active=False,
+            custom_pricing=True,
+            features_json=json.dumps(list(DEFAULT_PLAN_FEATURES), separators=(",", ":")),
+        )
+        db.session.add(plan)
+        db.session.flush()
+
+    company = Company(name=company_name, status="active", is_demo=True,
+                      storage_limit_bytes=1024 ** 3, project_limit=1, employee_limit=2)
+    admin_user = User(username=admin_email, email=admin_email, name=f"{company_name} Admin",
+                      email_verified=False, active=False, is_admin=True)
+    admin_user.set_password(secrets.token_urlsafe(40))
+    db.session.add_all([company, admin_user])
+    db.session.flush()
+    membership = CompanyMembership(company_id=company.id, user_id=admin_user.id,
+                                   role="company_admin", status="pending")
+    subscription = CompanySubscription(company_id=company.id, plan_id=plan.id, status="trialing",
+                                       billing_interval="monthly", current_period_start=now_utc())
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    code = ""
+    for _ in range(100):
+        candidate = "".join(secrets.choice(alphabet) for _ in range(4))
+        if not ProjectAccess.query.filter_by(code=candidate).first():
+            code = candidate
+            break
+    if not code:
+        db.session.rollback()
+        abort(503, "Could not allocate a project access code")
+    access = ProjectAccess(
+        company_id=company.id, project=project_name, code=code,
+        share_token=secrets.token_urlsafe(32), allow_overview=False,
+        allow_media=True, allow_documents=False,
+        expires_at=now_utc() + timedelta(days=7),
+    )
+    raw_token = secrets.token_urlsafe(32)
+    invite = EmailActionToken(user_id=admin_user.id,
+        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+        purpose="employee_invite", expires_at=now_utc() + timedelta(hours=48))
+    db.session.add_all([membership, subscription, access, invite])
+    db.session.commit()
+
+    invite_url = absolute_app_url("employee_setup", token=raw_token)
+    try:
+        delivered = send_account_email(
+            admin_email,
+            f"Set up your {company_name} Capture IV company account",
+            f"Hello,\n\nYour non-billable Capture IV demo workspace is ready. Choose a password using this secure link within 48 hours: {invite_url}\n\nWorkspace: {company_name}\nProject: {project_name}\nThis demo does not create a Stripe customer or charge.\n",
+        )
+    except Exception:
+        app.logger.exception("Demo company administrator invitation email delivery failed")
+        delivered = False
+    if not delivered:
+        app.logger.warning("Demo company invitation could not be delivered to %s", admin_email)
+
+    link = absolute_app_url("shared_project", token=access.share_token)
+    session["demo_workspace_result"] = {
+        "company": company_name,
+        "project": project_name,
+        "admin_email": admin_email,
+        "client_code": code,
+        "client_link": link,
+        "invite_sent": delivered,
+    }
+    audit("demo_workspace_created", "company", company.id,
+          "Created non-billable demo company and seven-day footage-only project access")
+    flash("Non-billable demo workspace created. No Stripe subscription or charge was created.",
+          "success" if delivered else "error")
+    return redirect(url_for("platform_owner_dashboard"))
+
+
+@app.post("/owner/companies/<int:company_id>/demo-invite/resend")
+@platform_owner_required
+def resend_demo_company_invite(company_id):
+    company = db.get_or_404(Company, company_id)
+    membership = CompanyMembership.query.filter_by(company_id=company.id, role="company_admin").first()
+    user = membership.user if membership else None
+    if not company.is_demo or not user or user.email_verified or membership.status != "pending":
+        abort(404)
+    EmailActionToken.query.filter_by(user_id=user.id, purpose="employee_invite", used_at=None).update(
+        {"used_at": now_utc()}, synchronize_session=False)
+    raw_token = secrets.token_urlsafe(32)
+    db.session.add(EmailActionToken(user_id=user.id,
+        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(), purpose="employee_invite",
+        expires_at=now_utc() + timedelta(hours=48)))
+    db.session.commit()
+    try:
+        delivered = send_account_email(user.email, f"Set up your {company.name} Capture IV company account",
+            f"Hello,\n\nChoose a password using this secure link within 48 hours: {absolute_app_url('employee_setup', token=raw_token)}\n")
+    except Exception:
+        app.logger.exception("Demo company invitation resend failed")
+        delivered = False
+    flash("Demo invitation sent." if delivered else "The demo invitation could not be delivered. Check email delivery settings.",
+          "success" if delivered else "error")
+    return redirect(url_for("platform_owner_dashboard"))
+
+
+@app.post("/owner/companies/<int:company_id>/delete-demo")
+@platform_owner_required
+def delete_demo_workspace(company_id):
+    """Remove only a marked demo tenant, including its uploaded private files."""
+    company = db.get_or_404(Company, company_id)
+    if not company.is_demo:
+        abort(404)
+    subscriptions = CompanySubscription.query.filter_by(company_id=company.id).all()
+    if any(row.stripe_subscription_id or row.stripe_customer_id for row in subscriptions):
+        abort(409, "A demo with Stripe billing references cannot be deleted by this action.")
+    memberships = CompanyMembership.query.filter_by(company_id=company.id).all()
+    user_ids = [row.user_id for row in memberships]
+    for model in STORAGE_FILE_MODELS:
+        for filename, in model.query.with_entities(model.filename).filter_by(company_id=company.id).all():
+            if is_r2_filename(filename):
+                try:
+                    R2Storage().delete(r2_object_key(filename))
+                except Exception:
+                    db.session.rollback()
+                    app.logger.exception("Demo R2 cleanup failed for company %s", company.id)
+                    flash("Demo files could not all be deleted from private storage. Nothing else was removed; retry after storage recovers.", "error")
+                    return redirect(url_for("platform_owner_dashboard"))
+            else:
+                delete_stored_file(filename)
+    for model in TENANT_MODELS:
+        # Use Core deletes here so the request's per-project ORM loader criteria
+        # cannot accidentally reference project columns absent on some tenant tables.
+        db.session.execute(model.__table__.delete().where(model.company_id == company.id))
+    CompanySubscription.query.filter_by(company_id=company.id).delete(synchronize_session=False)
+    CompanyMembership.query.filter_by(company_id=company.id).delete(synchronize_session=False)
+    ProjectAssignment.query.filter_by(company_id=company.id).delete(synchronize_session=False)
+    if user_ids:
+        EmailActionToken.query.filter(EmailActionToken.user_id.in_(user_ids)).delete(synchronize_session=False)
+        AuditLog.query.filter(AuditLog.user_id.in_(user_ids)).update({"user_id": None}, synchronize_session=False)
+        User.query.filter(User.id.in_(user_ids), User.platform_owner.is_(False)).delete(synchronize_session=False)
+    name = company.name
+    db.session.delete(company)
+    db.session.commit()
+    audit("demo_workspace_deleted", "company", company_id, "Deleted non-billable demo workspace and its project files")
+    flash(f"Demo workspace {name} and its project data were deleted.", "success")
     return redirect(url_for("platform_owner_dashboard"))
 
 
@@ -3411,15 +3600,9 @@ def protected_file(filename):
             abort(403)
         if flight_record and not company_feature_enabled("flight_scans", access.company_id):
             abort(403)
-        if document_record and not access.allow_documents:
-            abort(403)
-        if document_record and not company_feature_enabled("documents", access.company_id):
-            abort(403)
-        if map_record and not company_feature_enabled("site_maps", access.company_id):
-            abort(403)
-        if photo_record and not company_feature_enabled("photos", access.company_id):
-            abort(403)
-        if pinned_photo_record and not company_feature_enabled("photos", access.company_id):
+        # Client codes expose only drone footage. Even if a client guesses a
+        # media URL, code-based access cannot retrieve docs, maps, or photos.
+        if any((document_record, map_record, photo_record, pinned_photo_record)):
             abort(403)
     path = UPLOAD_DIR / safe
     if not is_r2_filename(safe) and (not path.exists() or not path.is_file()):
@@ -3731,9 +3914,9 @@ def create_project_access():
         db.session.add(access)
     access.expires_at = datetime.combine(expiration_date, datetime.max.time()) if expiration_date else None
     access.revoked_at = None
-    access.allow_overview = request.form.get("allow_overview") == "on"
-    access.allow_media = request.form.get("allow_media") == "on"
-    access.allow_documents = request.form.get("allow_documents") == "on"
+    access.allow_overview = False
+    access.allow_media = True
+    access.allow_documents = False
     db.session.commit()
     audit("project_access", "project", project, "Generated or rotated a four-character viewer code")
     flash(f"Viewer access updated for {project}.", "success")
@@ -4977,3 +5160,4 @@ def configure_basic_billing(monthly_price_id, annual_price_id):
 if __name__ == "__main__":
     init_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
