@@ -58,8 +58,10 @@ class NavigationSessionTests(unittest.TestCase):
     def test_company_admin_can_switch_all_pages_without_login(self):
         client = self.client(self.admin)
         for path, label in [('/dashboard','Archive'),('/admin','Admin'),('/admin/upload','Upload'),
-                            ('/admin/fieldview-sandbox','Sandbox'),('/admin/site-capture','Admin')]:
+                            ('/admin/site-capture','Admin')]:
             self.check_page(client, path, label)
+        self.assertEqual(client.get('/admin/fieldview-sandbox').status_code, 403)
+        self.assertNotIn(b'fieldview-sandbox', client.get('/admin').data)
         with client.session_transaction() as state:
             self.assertEqual(state['_user_id'], str(self.admin))
 
