@@ -38,7 +38,7 @@
       marker.bindPopup(`<div class="viewer-photo-popup"><strong>${escapeHTML(pin.label||'Site photos')}</strong>${gallery}</div>`,{maxWidth:300});
     });
   }
-  try{const boundary=JSON.parse(root.dataset.boundary||'[]');if(Array.isArray(boundary)&&boundary.length>=3){const polygon=L.polygon(boundary,{color:'#d5683b',weight:3,fillColor:'#e98a55',fillOpacity:.12}).addTo(map);map.fitBounds(polygon.getBounds(),{padding:[20,20],maxZoom:18})}}catch{}
+  try{const boundary=JSON.parse(root.dataset.boundary||'[]');if(Array.isArray(boundary)&&boundary.length>=3){const polygon=L.polygon(boundary,{color:'#d5683b',weight:3,fillColor:'#e98a55',fillOpacity:.12}).addTo(map);polygon.bindTooltip(String(root.dataset.boundaryName||'Site boundary'));map.fitBounds(polygon.getBounds(),{padding:[20,20],maxZoom:18})}}catch{}
   if(module==='ortho'&&root.dataset.orthoUrl){map.getPane('basemapPane').style.visibility='hidden';fetch(root.dataset.orthoUrl).then(r=>{if(!r.ok)throw Error('Orthomosaic unavailable');return r.arrayBuffer()}).then(bytes=>window.parseGeoraster(bytes)).then(georaster=>{const raster=new window.GeoRasterLayer({georaster,resolution:256,pane:'referencePane'}).addTo(map);const b=raster.getBounds();if(b?.isValid())map.fitBounds(b,{padding:[12,12],maxZoom:20})}).catch(()=>{$('#viewer-map-empty').textContent='This orthomosaic could not be loaded.';$('#viewer-map-empty').hidden=false})}
   if(module==='ortho'&&!root.dataset.orthoUrl){map.getPane('basemapPane').style.visibility='hidden';$('#viewer-map-empty').hidden=false}
   map.whenReady(()=>setTimeout(()=>map.invalidateSize(),100));window.addEventListener('resize',()=>map.invalidateSize());

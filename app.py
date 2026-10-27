@@ -225,6 +225,7 @@ BASIC_PLAN_SCHEMA_REVISION = "0014_basic_plan_entitlements"
 BILLING_PERIOD_START_SCHEMA_REVISION = "0015_subscription_period_start"
 DEMO_WORKSPACE_SCHEMA_REVISION = "0016_nonbillable_demo_workspaces"
 SITE_BOUNDARY_SCHEMA_REVISION = "0017_project_site_boundary"
+SITE_BOUNDARY_NAME_SCHEMA_REVISION = "0019_project_site_boundary_name"
 PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_PROJECT_LIMIT = 1
@@ -354,6 +355,7 @@ class ProjectSiteSetup(db.Model):
     zoom = db.Column(db.Integer, default=16)
     locked = db.Column(db.Boolean, default=True, nullable=False)
     boundary_json = db.Column(db.Text, nullable=False, default="[]")
+    boundary_name = db.Column(db.String(160), nullable=False, default="")
     updated_at = db.Column(db.DateTime, default=now_utc, onupdate=now_utc, nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
     __table_args__ = (db.UniqueConstraint("company_id", "project", name="uq_project_site_setup_company_project"),)
@@ -1479,6 +1481,7 @@ def migrate_sqlite():
         apply_billing_period_start_migration()
         apply_demo_workspace_schema_migration()
         apply_site_boundary_migration()
+        apply_site_boundary_name_migration()
         apply_project_code_email_migration()
         return
 
@@ -1583,6 +1586,7 @@ def migrate_sqlite():
     apply_saas_billing_migration()
     apply_billing_period_start_migration()
     apply_site_boundary_migration()
+    apply_site_boundary_name_migration()
     apply_project_code_email_migration()
 
 
@@ -1815,6 +1819,20 @@ def apply_site_boundary_migration():
             ))
     db.session.add(SchemaMigration(revision=SITE_BOUNDARY_SCHEMA_REVISION))
     db.session.commit()
+
+
+def apply_site_boundary_name_migration():
+    """Add a company-visible name for the saved project boundary."""
+    tables = set(inspect(db.engine).get_table_names())
+    if "project_site_setup" in tables:
+        columns = {column["name"] for column in inspect(db.engine).get_columns("project_site_setup")}
+        if "boundary_name" not in columns:
+            db.session.execute(text(
+                'ALTER TABLE "project_site_setup" ADD COLUMN "boundary_name" VARCHAR(160) NOT NULL DEFAULT \'\''
+            ))
+    if not db.session.get(SchemaMigration, SITE_BOUNDARY_NAME_SCHEMA_REVISION):
+        db.session.add(SchemaMigration(revision=SITE_BOUNDARY_NAME_SCHEMA_REVISION))
+        db.session.commit()
 
 
 def apply_project_code_email_migration():
@@ -4707,6 +4725,7 @@ def save_project_site_setup():
     project = request.form.get("project", "").strip()[:160]
     module = request.form.get("module", "map").strip()
     address = request.form.get("address", "").strip()[:300]
+    boundary_name = request.form.get("boundary_name", "").strip()[:160]
     if not project or module not in {"map", "image", "ortho"}:
         abort(400, "Choose a project and a valid reference type")
     try:
@@ -4727,6 +4746,8 @@ def save_project_site_setup():
                 and math.isfinite(point_lng) and -180 <= point_lng <= 180):
             abort(400, "Project boundary coordinates are outside the valid map range")
         normalized_boundary.append([point_lat, point_lng])
+    if normalized_boundary and not boundary_name:
+        abort(400, "Add a name for the site boundary")
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
         return redirect(f"/admin/upload?map_project={quote(project)}#videos")
@@ -4749,6 +4770,7 @@ def save_project_site_setup():
     setup.zoom = max(2, min(20, zoom))
     setup.locked = True
     setup.boundary_json = json.dumps(normalized_boundary)
+    setup.boundary_name = boundary_name if normalized_boundary else ""
     db.session.commit()
     audit("site_setup", "project", project, f"Saved {module} site reference")
     flash("Project site setup saved.", "success")
