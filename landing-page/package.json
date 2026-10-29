@@ -1,0 +1,13 @@
+{
+  "name": "capture-iv-landing-page",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/validate-artifact.mjs && node scripts/test-site.mjs && node scripts/test-config.mjs && node scripts/test-local-contact-store.mjs",
+    "preview": "node scripts/preview.mjs"
+  }
+}
