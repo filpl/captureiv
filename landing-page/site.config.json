@@ -1,0 +1,5 @@
+{
+  "platformLoginUrl": "https://app.captureiv.com/login",
+  "platformSignupUrl": "https://app.captureiv.com/register",
+  "platformEnterpriseUrl": "https://app.captureiv.com/enterprise/request"
+}

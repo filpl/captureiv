@@ -1941,10 +1941,17 @@ def render_project_view(access):
     token = access.share_token
     flights = Flight.query.filter_by(project=access.project, company_id=access.company_id).order_by(Flight.date.desc(), Flight.uploaded_at.desc()).all()
     docs = ProjectFile.query.filter_by(project=access.project, company_id=access.company_id).order_by(ProjectFile.date.desc(), ProjectFile.uploaded_at.desc()).all()
-    dates = sorted({f.date for f in flights}, reverse=True)
+    all_flight_paths = ProjectFlightPath.query.filter_by(
+        project=access.project, company_id=access.company_id
+    ).order_by(ProjectFlightPath.date, ProjectFlightPath.created_at).all()
+    dates = sorted(
+        {f.date for f in flights} | {path.date for path in all_flight_paths},
+        reverse=True,
+    )
     selected_date = parse_date(request.args.get("date"))
     if selected_date not in dates:
         selected_date = dates[0] if dates else now_utc().date()
+    compare_date = next((day for day in dates if day != selected_date), selected_date)
     day_flights = [f for f in flights if f.date == selected_date]
     site_map = ProjectSiteMap.query.filter_by(project=access.project, company_id=access.company_id).first()
     photo_reference = ProjectPhotoReference.query.filter_by(project=access.project,
@@ -2003,16 +2010,18 @@ def render_project_view(access):
                 "label": str(pin.get("label") or "Site photo")[:80],
                 "photos": by_pin.get(str(pin.get("id") or ""), []),
             })
-    flight_paths = ProjectFlightPath.query.filter_by(project=access.project, date=selected_date, company_id=access.company_id).order_by(ProjectFlightPath.created_at).all()
-    flight_path_data = []
-    for path in flight_paths:
+    flight_paths_by_date = {}
+    for path in all_flight_paths:
         try:
             points = json.loads(path.points or "[]")
         except (TypeError, json.JSONDecodeError):
             points = []
-        flight_path_data.append({"id": path.id, "name": path.name, "label": path.label,
-                                 "direction": path.direction, "points": points,
-                                 "flight_id": path.flight_id, "flight_title": path.flight.title if path.flight else ""})
+        flight_paths_by_date.setdefault(path.date.isoformat(), []).append({
+            "id": path.id, "name": path.name, "label": path.label,
+            "direction": path.direction, "points": points,
+            "flight_id": path.flight_id, "flight_title": path.flight.title if path.flight else "",
+        })
+    flight_path_data = flight_paths_by_date.get(selected_date.isoformat(), [])
     selected_id = request.args.get("flight", type=int)
     selected_flight = next((f for f in day_flights if f.id == selected_id), None) or (day_flights[0] if day_flights else None)
     tab = request.args.get("tab", "media")
@@ -2036,6 +2045,8 @@ def render_project_view(access):
                            map_pins=map_pins, map_pin_data=map_pin_data, photo_pin_data=photo_pin_data,
                            photo_area_data=photo_area_data,
                            site_setup=site_setup, flight_paths=flight_path_data,
+                           flight_paths_by_date=flight_paths_by_date,
+                           compare_date=compare_date,
                            google_maps_api_key=app.config.get("GOOGLE_MAPS_API_KEY", ""),
                            map_default_center=request_geo_center())
 

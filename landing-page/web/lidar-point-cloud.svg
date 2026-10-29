@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 520" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="46" y1="26" x2="694" y2="488" gradientUnits="userSpaceOnUse"><stop stop-color="#102630"/><stop offset="1" stop-color="#1B4149"/></linearGradient>
+    <linearGradient id="scan" x1="310" y1="128" x2="479" y2="338" gradientUnits="userSpaceOnUse"><stop stop-color="#B9FF5B" stop-opacity=".8"/><stop offset="1" stop-color="#31D9C5" stop-opacity=".04"/></linearGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse"><path d="M34 0H0V34" stroke="#B3D2D0" stroke-opacity=".12"/></pattern>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="760" height="520" rx="20" fill="url(#bg)"/><rect width="760" height="520" rx="20" fill="url(#grid)"/>
+  <path d="M95 403h570M132 362h486M167 321h406M202 280h326M237 239h246M272 198h166" stroke="#C2D7D5" stroke-opacity=".2"/>
+  <path d="M209 362V210l128-71 133 71v152M209 210l130 77 131-77M339 287v116M271 174v188M403 174v188" stroke="#A6F9E4" stroke-opacity=".36" stroke-width="1.5"/>
+  <path d="m336 138 137 74-134 75-130-77 127-72Z" fill="url(#scan)" fill-opacity=".28"/>
+  <g fill="#D8FF78" filter="url(#glow)">
+    <circle cx="209" cy="210" r="3"/><circle cx="337" cy="139" r="3"/><circle cx="470" cy="210" r="3"/><circle cx="339" cy="287" r="3"/><circle cx="209" cy="362" r="2.7"/><circle cx="470" cy="362" r="2.7"/>
+    <circle cx="247" cy="189" r="2"/><circle cx="280" cy="170" r="2"/><circle cx="313" cy="152" r="2"/><circle cx="369" cy="157" r="2"/><circle cx="402" cy="175" r="2"/><circle cx="436" cy="193" r="2"/>
+    <circle cx="247" cy="232" r="2"/><circle cx="279" cy="251" r="2"/><circle cx="306" cy="267" r="2"/><circle cx="369" cy="269" r="2"/><circle cx="403" cy="250" r="2"/><circle cx="436" cy="230" r="2"/>
+    <circle cx="242" cy="259" r="1.8"/><circle cx="276" cy="279" r="1.8"/><circle cx="306" cy="298" r="1.8"/><circle cx="370" cy="298" r="1.8"/><circle cx="404" cy="278" r="1.8"/><circle cx="438" cy="258" r="1.8"/>
+    <circle cx="243" cy="304" r="1.8"/><circle cx="277" cy="324" r="1.8"/><circle cx="306" cy="343" r="1.8"/><circle cx="370" cy="343" r="1.8"/><circle cx="405" cy="323" r="1.8"/><circle cx="438" cy="303" r="1.8"/>
+  </g>
+  <path d="M110 410 339 287l230 123" stroke="#63E8D2" stroke-opacity=".7" stroke-dasharray="5 8"/>
+  <circle cx="339" cy="287" r="8" fill="#B9FF5B"/><circle cx="339" cy="287" r="22" stroke="#B9FF5B" stroke-opacity=".6"/>
+  <rect x="34" y="30" width="192" height="42" rx="8" fill="#0C1A20" fill-opacity=".76" stroke="#A3D6D1" stroke-opacity=".25"/><circle cx="53" cy="51" r="4" fill="#B9FF5B"/><text x="68" y="56" fill="#E9F5F2" font-family="Arial,sans-serif" font-size="12" letter-spacing="1.6">LIDAR POINT CLOUD</text>
+  <rect x="538" y="389" width="185" height="96" rx="12" fill="#0C1A20" fill-opacity=".8" stroke="#A3D6D1" stroke-opacity=".26"/><text x="558" y="420" fill="#8CA6A8" font-family="Arial,sans-serif" font-size="11" letter-spacing="1.4">CAPTURE MODE</text><text x="558" y="447" fill="#F1F7F5" font-family="Arial,sans-serif" font-size="17" font-weight="700">3D scan</text><text x="558" y="468" fill="#B9FF5B" font-family="Arial,sans-serif" font-size="11">SITE / STRUCTURE 04</text>
+</svg>

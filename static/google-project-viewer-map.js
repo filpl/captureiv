@@ -15,6 +15,6 @@
     $('#mapAttribution')?.replaceChildren(document.createTextNode('Map data © Google'));
     google.maps.event.addListenerOnce(map,'idle',()=>setTimeout(()=>google.maps.event.trigger(map,'resize'),60));
   };
-  window.initProjectViewerGoogleMap=init;
+  window.initProjectViewerGoogleMap=()=>{init();window.initProjectViewerCompareMaps?.()};
   if(window.google?.maps)init();
 })();

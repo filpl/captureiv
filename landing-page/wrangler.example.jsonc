@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "capture-iv-landing-page",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-10-19",
+  "build": {"command": "npm run build"},
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "construct-iv-inquiries",
+    "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+    "migrations_dir": "drizzle"
+  }]
+}
