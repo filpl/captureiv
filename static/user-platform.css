@@ -1919,3 +1919,8 @@ body.viewer-page .viewer-footer-brand .civ-logo { letter-spacing: -.035em !impor
 
 /* Viewer page: logo lives in the footer only; navbar starts with the page label */
 body.viewer-page .viewer-topnav-label--plain { padding-left: 4px; }
+
+/* Footer legal links (production) */
+body.viewer-page .viewer-footer-legal { display: flex; gap: 14px; margin-left: auto; margin-right: 22px; font-size: 12px; }
+body.viewer-page .viewer-footer-legal a { color: var(--up-muted-on-dark, #9aa3b2); text-decoration: none; }
+body.viewer-page .viewer-footer-legal a:hover { color: #fff; }
