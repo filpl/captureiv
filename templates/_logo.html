@@ -1,0 +1,4 @@
+{# Capture IV logo: the angular C mark is the "C" of Capture. theme: light | dark #}
+{% macro civ_logo(theme='light', tagline='') -%}
+<span class="civ-logo civ-logo--{{ theme }}"><span class="civ-row"><svg class="civ-mark" viewBox="0 0 104 100" aria-hidden="true" focusable="false"><path d="M25 0H104L77 27H30V73H77L104 100H25L0 76V24Z"/></svg><span class="civ-word" aria-hidden="true">apture&nbsp;<b>IV</b></span></span>{% if tagline %}<small class="civ-tag">{{ tagline }}</small>{% endif %}<span class="civ-sr">Capture IV</span></span>
+{%- endmacro %}
