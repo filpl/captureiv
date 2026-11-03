@@ -57,8 +57,8 @@ class NavigationSessionTests(unittest.TestCase):
 
     def test_company_admin_can_switch_all_pages_without_login(self):
         client = self.client(self.admin)
-        for path, label in [('/dashboard','Archive'),('/admin','Admin'),('/admin/upload','Upload'),
-                            ('/admin/site-capture','Admin')]:
+        for path, label in [('/dashboard','Archive'),('/admin','Admin'),('/admin/upload','Workspace'),
+                            ('/admin/site-capture','Workspace')]:
             self.check_page(client, path, label)
         self.assertEqual(client.get('/admin/fieldview-sandbox').status_code, 403)
         self.assertNotIn(b'fieldview-sandbox', client.get('/admin').data)
@@ -67,7 +67,7 @@ class NavigationSessionTests(unittest.TestCase):
 
     def test_unscoped_owner_sees_workspace_guide_instead_of_login(self):
         client = self.client(self.owner)
-        for path, label in [('/dashboard','Archive'),('/admin','Admin'),('/admin/upload','Upload'),
+        for path, label in [('/dashboard','Archive'),('/admin','Admin'),('/admin/upload','Workspace'),
                             ('/admin/fieldview-sandbox','Sandbox'),('/owner','Platform Owner')]:
             html = self.check_page(client, path, label)
             if path != '/owner':
@@ -80,7 +80,7 @@ class NavigationSessionTests(unittest.TestCase):
         for company, visible, hidden in [(self.a,'Only company A','Only company B'), (self.b,'Only company B','Only company A')]:
             response = client.post('/owner/workspace', data={'_csrf':'navigation-csrf','company_id':company,'next_endpoint':'admin'})
             self.assertEqual(response.location, '/admin')
-            for path, label in [('/dashboard','Archive'),('/admin','Admin'),('/admin/upload','Upload')]:
+            for path, label in [('/dashboard','Archive'),('/admin','Admin'),('/admin/upload','Workspace')]:
                 html = self.check_page(client, path, label)
                 self.assertIn(visible, html)
                 self.assertNotIn(hidden, html)

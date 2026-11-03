@@ -847,7 +847,7 @@ def navigation_context():
         section = "owner"
     elif endpoint == "fieldview_sandbox":
         section = "sandbox"
-    elif endpoint == "upload" or request.path.startswith(("/admin/upload", "/admin/r2-upload")):
+    elif endpoint in {"upload", "site_capture"} or request.path.startswith(("/admin/upload", "/admin/site-capture", "/admin/r2-upload")):
         section = "upload"
     elif endpoint == "billing_portal":
         section = "billing"
@@ -3923,7 +3923,7 @@ def render_capture_workspace(worker_mode=False):
                            worker_mode=worker_mode, project_docs=project_docs,
                            project_names=sorted(project_names, key=str.casefold), access_rows=access_rows,
                            projects=sorted(project_names, key=str.casefold), directions=DIRECTIONS,
-                           initial_view="videos" if worker_mode else ("uploads" if request.path == "/admin/upload" else "videos"),
+                           initial_view="videos",
                            workspace_url=url_for("upload") if worker_mode else url_for("site_capture"),
                            selected_map_project=selected_map_project, selected_site_map=selected_site_map,
                            selected_photo_reference=selected_photo_reference,

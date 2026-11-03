@@ -152,6 +152,11 @@ class WorkerAccountTests(unittest.TestCase):
         self.assertNotIn('class="worker-mode"', html)
         self.assertIn('data-capture-view="documents"', html)
         self.assertIn("Unassigned doc", html)
+        # Admins see the same two tabs as workers, plus the admin-only oversight tools.
+        self.assertIn('class="capture-tab worker-hidden', html)
+        self.assertIn('data-initial-view="videos"', html)
+        self.assertIn('id="site-module-chooser" class="module-picker admin-only"', html)
+        self.assertIn("/admin/site-capture", admin.get("/dashboard").get_data(as_text=True))
 
     def test_other_company_cannot_edit_this_companys_records(self):
         stranger = self.login("wt-other-admin")
