@@ -1,0 +1,20 @@
+{% extends "legal/_base.html" %}
+{% block meta %}<p class="legal-meta">Billing terms version {{ legal.billing_version }}</p>{% endblock %}
+{% block body %}
+<h2>Monthly Basic</h2>
+<p>Monthly payments are not refunded automatically, including for a partly used month, except where the law requires a refund or we approve an exception.</p>
+
+<h2>Annual Basic</h2>
+<ul>
+<li>A company administrator can submit an early-cancellation and refund-review request from <strong>Billing</strong> in the company account.</li>
+<li>Each request is reviewed by Capture IV staff, who may approve a full or partial refund, decline it, or ask for more information. No prorated formula or refund is guaranteed.</li>
+<li>Submitting a request does not cancel the subscription, pause access or issue a refund by itself. Cancelling renewal is a separate step.</li>
+<li>Approved refunds are paid back through Stripe to the original payment method.</li>
+</ul>
+
+<h2>Enterprise</h2>
+<p>Refunds for Enterprise plans follow the separate Enterprise agreement.</p>
+
+<h2>Questions</h2>
+<p>For billing questions, email <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a>. See also <a href="{{ legal_url('billing') }}">Plans, Billing &amp; Cancellation</a>.</p>
+{% endblock %}

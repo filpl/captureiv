@@ -1,0 +1,45 @@
+{% extends "legal/_base.html" %}
+{% block body %}
+<p>These Terms of Service ("Terms") govern use of Capture IV, a platform operated by {{ legal.entity }} ("we", "us") for storing, organizing, displaying and sharing construction-project media such as drone footage, site photos, maps, flight paths and project documents. By creating an account, accepting an invitation, or opening a shared project, you agree to these Terms.</p>
+
+<h2>1. Accounts and roles</h2>
+<ul>
+<li><strong>Company accounts.</strong> A company (for example, a contractor) has a workspace managed by one or more company administrators, who invite employees and control projects, files, client sharing and billing for that workspace.</li>
+<li><strong>Employees.</strong> Employee accounts act for their company and only see projects their company assigns to them.</li>
+<li><strong>Client viewers.</strong> People given a project link and access code by a company can view, and where the company permits, download that project's shared media. Client viewers cannot edit projects.</li>
+<li><strong>Platform staff.</strong> Our staff administer the platform, including account status, plans and security.</li>
+</ul>
+<p>You must give accurate account information and keep passwords, project links and access codes confidential. You are responsible for activity under your account. Tell us promptly at <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a> if you suspect unauthorized access.</p>
+
+<h2>2. Your content</h2>
+<p>Your company keeps ownership of the footage, photos, documents and other material it uploads ("Customer Content"). You give us permission to store, process, display and transmit Customer Content only as needed to provide, secure and support the service for your company and the people you share it with.</p>
+<p>Your company decides who receives project links and codes and is responsible for that sharing. Anyone with a project's link and code can view what the company has chosen to share on it.</p>
+
+<h2>3. Acceptable use</h2>
+<p>You may upload and share only material you own or have permission to use. You are responsible for complying with laws that apply to your captures, including aviation and drone rules, privacy and recording laws for people or property shown, and any client or project confidentiality requirements. You must not:</p>
+<ul>
+<li>attempt to access another company's data, accounts or projects, or bypass access codes, rate limits or other security controls;</li>
+<li>upload malware, or use the service to infringe others' rights or for unlawful purposes;</li>
+<li>scrape, overload or disrupt the service, or probe or test its security without our written permission;</li>
+<li>resell or sublicense access to the service except as your plan allows.</li>
+</ul>
+<p>See the <a href="{{ legal_url('copyright') }}">Copyright &amp; Content Policy</a> for how to report content that infringes your rights.</p>
+
+<h2>4. Plans, billing and cancellation</h2>
+<p>Paid plans, automatic renewal, cancellation, refunds and file retrieval after a subscription ends are described in <a href="{{ legal_url('billing') }}">Plans, Billing &amp; Cancellation</a> and the <a href="{{ legal_url('refunds') }}">Refund Policy</a>, which form part of these Terms. Enterprise plans are governed by a separate written agreement where one applies.</p>
+
+<h2>5. Suspension and ending access</h2>
+<p>We may suspend or restrict access to protect the service, other customers or the public, for non-payment, or for serious or repeated breaches of these Terms. Where reasonable we will tell you first. When paid access ends, the file-retrieval window described in <a href="{{ legal_url('billing') }}">Plans, Billing &amp; Cancellation</a> applies; a security suspension can override it. You should keep your own copies of important files.</p>
+
+<h2>6. Service changes</h2>
+<p>We may update features of the service. We will not intentionally remove core paid features during a paid billing period without notice.</p>
+
+<h2>7. Disclaimers and liability</h2>
+<p>The service is provided "as is" and "as available". To the extent the law allows, we do not guarantee that it will be uninterrupted or error-free, and we are not liable for indirect or consequential losses. Nothing in these Terms limits liability that cannot be limited by law. <em>Specific liability limits are subject to final legal review.</em></p>
+
+<h2>8. Changes to these Terms</h2>
+<p>We may update these Terms. We will show the new version on this page and, for material changes, notify company administrators by email or in the app. Continued use after a change takes effect means you accept the updated Terms.</p>
+
+<h2>9. Governing law</h2>
+<p>{% if legal.governing_law %}These Terms are governed by the laws of {{ legal.governing_law }}.{% else %}<em>Governing law and venue are to be confirmed by the Platform Owner.</em>{% endif %}</p>
+{% endblock %}

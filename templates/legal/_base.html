@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title or 'Legal' }} · Capture IV</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='legal.css') }}?v=1"></head>
+<body class="legal-page"><a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="legal-top"><a class="legal-brand" href="{{ url_for('index') }}">Capture <span>IV</span></a>
+<nav aria-label="Legal pages">{% for key, name in legal.pages.items() %}<a href="{{ legal_url(key) }}"{% if slug == key %} aria-current="page"{% endif %}>{{ name.split(' ')[0] if key != 'billing' else 'Billing' }}</a>{% endfor %}</nav></header>
+<main id="main-content" class="legal-main">
+{% if not legal.approved %}<aside class="legal-draft" role="note"><strong>Draft for owner and legal review.</strong> This page describes how Capture IV works today and the policies the Platform Owner has approved so far. It has not yet been approved as final legal terms.</aside>{% endif %}
+<article class="legal-doc">
+<p class="legal-eyebrow">Capture IV{% if legal.entity != "Capture IV" %} · {{ legal.entity }}{% endif %}</p>
+<h1>{{ title }}</h1>
+{% block meta %}<p class="legal-meta">Version {{ legal.terms_version }}</p>{% endblock %}
+{% block body %}{% endblock %}
+<section class="legal-contact"><h2>Contact</h2><p>Questions about this page: <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a>{% if legal.postal_address %} · {{ legal.postal_address }}{% endif %}</p></section>
+</article></main>
+<footer class="legal-foot">{% for key, name in legal.pages.items() %}<a href="{{ legal_url(key) }}">{{ name }}</a>{% endfor %}</footer>
+</body></html>

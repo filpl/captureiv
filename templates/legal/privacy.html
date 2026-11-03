@@ -1,0 +1,51 @@
+{% extends "legal/_base.html" %}
+{% block meta %}<p class="legal-meta">Version {{ legal.privacy_version }}</p>{% endblock %}
+{% block body %}
+<p>This Privacy Policy explains what personal information Capture IV, operated by {{ legal.entity }}, handles, why, and the choices you have. It covers company accounts, employees, client viewers and visitors to the platform.</p>
+
+<h2>Information we handle</h2>
+<ul>
+<li><strong>Account details:</strong> name, username, work email, company name and role, and a protected (hashed) password. We never store plain-text passwords.</li>
+<li><strong>Customer Content:</strong> footage, photos, maps, flight paths, site boundaries and documents that companies upload. These can show people, vehicles or property, and may include location data. Each company controls its own Customer Content.</li>
+<li><strong>Billing details:</strong> plan, billing interval, subscription status and payment records. Card details are entered on Stripe's checkout page and are handled by Stripe; we do not receive or store full card numbers.</li>
+<li><strong>Security and activity records:</strong> sign-ins, administrative actions, sharing changes and downloads, including the IP address of the request and the time. For limiting repeated sign-in and code attempts we store only a one-way (hashed) value derived from the IP address.</li>
+<li><strong>Client viewer access:</strong> when you open a shared project we record that access was granted in a session cookie (see the <a href="{{ legal_url('cookies') }}">Cookie Policy</a>). Client viewers do not create an account.</li>
+<li><strong>Messages:</strong> details you send through enterprise or contact requests.</li>
+</ul>
+
+<h2>How we use it</h2>
+<ul>
+<li>to provide the service: accounts, projects, sharing, storage and playback;</li>
+<li>to keep the service and each company's data secure and separate, and to investigate misuse;</li>
+<li>to handle subscriptions, billing records and refund requests;</li>
+<li>to send service email such as verification, password reset, invitations and access-code updates;</li>
+<li>to meet legal, accounting and record-keeping obligations.</li>
+</ul>
+<p>We do not sell personal information and we do not use advertising or analytics trackers on the platform.</p>
+
+<h2>Service providers</h2>
+<p>We use providers that process information for us to run the service:</p>
+<ul>
+<li><strong>Hosting:</strong> Render (application and database).</li>
+<li><strong>File storage:</strong> Cloudflare R2, in a private bucket.</li>
+<li><strong>Payments:</strong> Stripe.</li>
+<li><strong>Email delivery:</strong> our email sending provider.</li>
+<li><strong>Maps:</strong> Google Maps, plus map tiles and libraries loaded from OpenStreetMap, Esri and unpkg. When a map loads, your browser contacts these providers directly, so they receive your IP address and browser details under their own privacy policies.</li>
+</ul>
+<p>We may also disclose information if required by law, to protect rights and safety, or as part of a business transfer under equivalent protections.</p>
+
+<h2>How long we keep it</h2>
+<p>Account, billing and security records are kept while an account is active and afterwards as needed for security, billing, legal and accounting purposes. After a paid subscription ends, the company's administrator can download existing files for 90 days, as described in <a href="{{ legal_url('billing') }}">Plans, Billing &amp; Cancellation</a>. We do not promise indefinite retention, and files are not deleted automatically at the end of that window; deletion follows a reviewed process. Companies can ask us to delete their data.</p>
+
+<h2>Security</h2>
+<p>Customer files are stored privately and served only to signed-in members of the owning company, or to client viewers who have that project's link and code. Each company's data is kept separate from other companies'. No system is perfectly secure; tell us at <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a> if you notice a problem.</p>
+
+<h2>Your choices and rights</h2>
+<p>You can ask to access, correct or delete your personal information, or ask questions about how it is used, by emailing <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a>. If you are an employee or client viewer of a company, we may refer requests about that company's Customer Content to the company, since it controls that content. We respond as required by the laws that apply to you.</p>
+
+<h2>Children</h2>
+<p>Capture IV is a business service and is not intended for children.</p>
+
+<h2>Changes</h2>
+<p>We will post updates to this policy here with a new version date, and notify company administrators of material changes.</p>
+{% endblock %}

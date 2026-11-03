@@ -17,7 +17,7 @@
     </fieldset>
     <label>Password<input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
     <label>Confirm password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>
-    <label class="checkout-accept"><input type="checkbox" name="accept_policies" value="yes" required><span>I agree to the <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/terms" target="_blank" rel="noopener">Terms</a> and acknowledge the <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
+    <label class="checkout-accept"><input type="checkbox" name="accept_policies" value="yes" required><span>I agree to the <a href="{{ legal_url('terms') }}" target="_blank" rel="noopener">Terms</a> and acknowledge the <a href="{{ legal_url('privacy') }}" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>
     <button class="button primary full" {% if not plans %}disabled{% endif %}>Create pending account <span>→</span></button>
   </form>
   <p class="fineprint">Basic includes one active project, two authenticated company accounts, and 1 TB total storage. No storage add-ons are offered. Only company, work email, and account credentials are required. Name fields are optional. <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/">Back to Capture IV</a></p>
