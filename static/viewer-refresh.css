@@ -131,3 +131,4 @@ body.viewer-page .date-rail [aria-current] { background: var(--vr-blue-soft) !im
 body.viewer-page .eyebrow { color: #2f6fe0; }
 body.viewer-page .date-rail .date-item.current { background: var(--vr-blue-soft) !important; color: #1d5fd6; border-color: transparent; }
 body.viewer-page .date-rail .date-item.current * { color: inherit; }
+body.viewer-page .viewer-logo-foot .civ-logo .civ-tag { font-size: 6.4px !important; letter-spacing: .08em !important; }
