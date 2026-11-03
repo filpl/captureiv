@@ -71,6 +71,11 @@ class WorkerAccountTests(unittest.TestCase):
         self.assertIn('data-capture-view="documents"', html)
         self.assertIn('id="site-module-chooser" class="module-picker admin-only"', html)
         self.assertIn('class="site-boundary-editor admin-only"', html)
+        # Workers see Videos & routes and Documents only; footage upload, photos and
+        # overview are repetitive for them and hidden.
+        self.assertIn('data-initial-view="videos"', html)
+        self.assertIn('class="capture-tab worker-hidden', html)
+        self.assertIn('id="uploadsView" class="worker-hidden workspace', html)
 
     def test_worker_can_add_a_day_route_on_assigned_project_only(self):
         worker = self.login("wt-worker")
