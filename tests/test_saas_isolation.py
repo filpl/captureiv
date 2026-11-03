@@ -17,6 +17,16 @@ from werkzeug.datastructures import FileStorage, MultiDict
 import app as portal
 
 
+def unlock_viewer_state(state, code):
+    """Place a current viewer session (link + code + time) as the share page would."""
+    with portal.app.app_context():
+        access = portal.ProjectAccess.query.filter_by(code=code).first()
+        token = access.share_token if access else None
+    state["viewer_code"] = code
+    state["viewer_token"] = token
+    state["viewer_granted_at"] = int(portal.now_utc().timestamp())
+
+
 class FakeMultipartStorage:
     def __init__(self):
         self.multipart = {}
@@ -432,9 +442,10 @@ class TenantIsolationTests(unittest.TestCase):
             access = portal.ProjectAccess.query.filter_by(code="BBBB").one()
             token = access.share_token
         legacy = client.get("/project/BBBB?tab=media")
-        self.assertEqual(legacy.status_code, 302)
-        self.assertIn(f"/share/{token}", legacy.headers["Location"])
-        challenge = client.get(legacy.headers["Location"])
+        self.assertEqual(legacy.status_code, 404)
+        self.assertNotIn("Location", legacy.headers)
+        self.assertNotIn(token.encode(), legacy.data)
+        challenge = client.get(f"/share/{token}?tab=media")
         self.assertEqual(challenge.status_code, 200)
         self.assertIn(b"4-letter code", challenge.data)
         self.assertNotIn(b"B  B  B  B", challenge.data)
@@ -472,7 +483,7 @@ class TenantIsolationTests(unittest.TestCase):
             self.assertEqual(access.expires_at.date().isoformat(), expiration)
             self.assertTrue(access.allow_media)
         legacy = client.get(f"/project/{access_code}")
-        self.assertEqual(legacy.status_code, 302)
+        self.assertEqual(legacy.status_code, 404)
         with portal.app.app_context():
             token = portal.ProjectAccess.query.filter_by(id=access_id).one().share_token
         challenge = client.get(f"/share/{token}")
@@ -558,7 +569,7 @@ class TenantIsolationTests(unittest.TestCase):
             portal.db.session.add(flight); portal.db.session.commit()
         client = portal.app.test_client()
         with client.session_transaction() as state:
-            state["viewer_code"] = "BBBB"
+            unlock_viewer_state(state, "BBBB")
         class FakeStorage:
             def signed_download(self, key, filename, content_type, download, expires=300):
                 self.args = (key, filename, content_type, download, expires)
@@ -575,7 +586,7 @@ class TenantIsolationTests(unittest.TestCase):
     def test_public_cannot_access_other_tenant_r2_file_even_when_key_is_known(self):
         client = portal.app.test_client()
         with client.session_transaction() as state:
-            state["viewer_code"] = "BBBB"
+            unlock_viewer_state(state, "BBBB")
         with patch.object(portal, "R2Storage") as storage:
             response = client.get("/files/r2__companies/1/not-shared.mp4")
         self.assertEqual(response.status_code, 403)
@@ -670,7 +681,7 @@ class TenantIsolationTests(unittest.TestCase):
 
         foreign_viewer = portal.app.test_client()
         with foreign_viewer.session_transaction() as state:
-            state["viewer_code"] = "BBBB"
+            unlock_viewer_state(state, "BBBB")
         self.assertEqual(foreign_viewer.get("/files/pinned-photo-one.jpg").status_code, 403)
 
         with portal.app.app_context():
@@ -725,12 +736,12 @@ class TenantIsolationTests(unittest.TestCase):
             self.assertGreater(access.expires_at, portal.now_utc() + portal.timedelta(days=6))
             self.assertEqual(membership.role, "company_admin")
             self.assertEqual(membership.status, "pending")
-            code, company_id = access.code, company.id
+            code, company_id, demo_token = access.code, company.id, access.share_token
 
         visitor = portal.app.test_client()
-        landing = visitor.get("/")
+        landing = visitor.get(f"/share/{demo_token}")
         visitor_csrf = re.search(rb'name="_csrf" value="([^\"]+)"', landing.data).group(1).decode()
-        unlocked = visitor.post("/", data={"_csrf": visitor_csrf, "code": code})
+        unlocked = visitor.post(f"/share/{demo_token}", data={"_csrf": visitor_csrf, "code": code, "next_tab": "media"})
         self.assertEqual(unlocked.status_code, 302)
         viewer_page = visitor.get(unlocked.headers["Location"])
         self.assertEqual(viewer_page.status_code, 200)
