@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title or 'Legal' }} · Capture IV</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='legal.css') }}?v=1"></head>
+<link rel="stylesheet" href="{{ url_for('static', filename='legal.css') }}?v=2"></head>
 <body class="legal-page"><a class="skip-link" href="#main-content">Skip to main content</a>
 <header class="legal-top"><a class="legal-brand" href="{{ url_for('index') }}">Capture <span>IV</span></a>
 <nav aria-label="Legal pages">{% for key, name in legal.pages.items() %}<a href="{{ legal_url(key) }}"{% if slug == key %} aria-current="page"{% endif %}>{{ name.split(' ')[0] if key != 'billing' else 'Billing' }}</a>{% endfor %}</nav></header>

@@ -53,6 +53,17 @@ class LegalPagesTests(unittest.TestCase):
             self.assertIn(b"Example Operator LLC", page)
             self.assertIn(b"the State of Example", page)
 
+    def test_terms_show_the_arbitration_section_clearly_and_signup_names_it(self):
+        client = portal.app.test_client()
+        terms = client.get("/legal/terms").get_data(as_text=True)
+        self.assertIn('id="dispute-resolution"', terms)
+        self.assertIn("binding arbitration and class-action waiver", terms)
+        self.assertIn("30-day opt-out", terms)
+        self.assertLess(terms.index("Please read Section 9"), terms.index("1. Accounts and roles"))
+        signup = client.get("/register").get_data(as_text=True)
+        self.assertIn("binding arbitration and a class-action waiver", signup)
+        self.assertIn("/legal/terms#dispute-resolution", signup)
+
     def test_signup_checkout_and_viewer_links_point_to_app_legal_pages(self):
         client = portal.app.test_client()
         for path in ("/register", "/"):

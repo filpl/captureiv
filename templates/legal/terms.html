@@ -1,5 +1,6 @@
 {% extends "legal/_base.html" %}
 {% block body %}
+<aside class="legal-key-notice" role="note"><strong>Please read Section 9, “Dispute resolution: binding arbitration and class-action waiver.”</strong> It means most disputes are decided by an arbitrator instead of a judge or jury, and that claims are brought individually, not as a class action. You can opt out within 30 days of accepting these Terms.</aside>
 <p>These Terms of Service ("Terms") govern use of Capture IV, a platform operated by {{ legal.entity }} ("we", "us") for storing, organizing, displaying and sharing construction-project media such as drone footage, site photos, maps, flight paths and project documents. By creating an account, accepting an invitation, or opening a shared project, you agree to these Terms.</p>
 
 <h2>1. Accounts and roles</h2>
@@ -40,6 +41,21 @@
 <h2>8. Changes to these Terms</h2>
 <p>We may update these Terms. We will show the new version on this page and, for material changes, notify company administrators by email or in the app. Continued use after a change takes effect means you accept the updated Terms.</p>
 
-<h2>9. Governing law</h2>
+<section class="legal-arbitration" id="dispute-resolution" aria-labelledby="dispute-resolution-title">
+<h2 id="dispute-resolution-title">9. Dispute resolution: binding arbitration and class-action waiver</h2>
+<p class="legal-arbitration-lead"><strong>Please read this section carefully. It affects how disputes are resolved and limits your right to go to court.</strong></p>
+<ol class="legal-arbitration-terms">
+<li><strong>Talk to us first.</strong> Before starting any claim, contact us at <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a> with a description of the dispute. Both sides will try in good faith to resolve it within 60 days.</li>
+<li><strong>Binding arbitration.</strong> If it is not resolved, you and {{ legal.entity }} agree that any dispute arising out of or relating to these Terms or the service will be decided by binding individual arbitration, not in court, administered by {% if legal.arbitration_provider %}{{ legal.arbitration_provider }}{% else %}<em>[arbitration provider to be confirmed]</em>{% endif %} under its applicable rules{% if legal.arbitration_location %}, in {{ legal.arbitration_location }}{% endif %}.</li>
+<li><strong>No jury trial.</strong> You and {{ legal.entity }} each waive the right to a trial by jury.</li>
+<li><strong>Class-action waiver.</strong> Claims may be brought only on an individual basis, not as a plaintiff or class member in any class, collective or representative proceeding. The arbitrator may not combine claims of different customers.</li>
+<li><strong>Exceptions.</strong> Either side may bring an individual claim in small-claims court if it qualifies, and either side may ask a court for urgent relief to stop infringement of intellectual property or unauthorized access to accounts or data.</li>
+<li><strong>30-day opt-out.</strong> You can opt out of this section by emailing <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a> within 30 days of first accepting these Terms, with your name, company and a statement that you opt out of arbitration. Opting out does not affect any other part of these Terms.</li>
+<li><strong>If part of this section is invalid.</strong> If the class-action waiver is found unenforceable for a claim, that claim will proceed in court and not in arbitration.</li>
+</ol>
+<p class="legal-arbitration-note"><em>Draft clause: the arbitration provider, location, rules, fees and carve-outs are to be confirmed in legal review.</em></p>
+</section>
+
+<h2>10. Governing law</h2>
 <p>{% if legal.governing_law %}These Terms are governed by the laws of {{ legal.governing_law }}.{% else %}<em>Governing law and venue are to be confirmed by the Platform Owner.</em>{% endif %}</p>
 {% endblock %}

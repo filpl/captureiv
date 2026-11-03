@@ -832,6 +832,8 @@ def legal_details():
         "contact_email": os.environ.get("LEGAL_CONTACT_EMAIL", "").strip() or "support@captureiv.com",
         "postal_address": os.environ.get("LEGAL_POSTAL_ADDRESS", "").strip(),
         "governing_law": os.environ.get("LEGAL_GOVERNING_LAW", "").strip(),
+        "arbitration_provider": os.environ.get("LEGAL_ARBITRATION_PROVIDER", "").strip(),
+        "arbitration_location": os.environ.get("LEGAL_ARBITRATION_LOCATION", "").strip(),
         "approved": os.environ.get("LEGAL_TERMS_APPROVED", "0").strip() == "1",
         "terms_version": ACCOUNT_TERMS_VERSION,
         "privacy_version": PRIVACY_NOTICE_VERSION,

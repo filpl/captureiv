@@ -28,3 +28,12 @@ a { color: var(--blue); }
 .legal-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; padding: 24px 16px 40px; font-size: 14px; }
 .legal-foot a { color: var(--muted); }
 @media (max-width: 600px) { .legal-table, .legal-table tbody, .legal-table tr, .legal-table td { display: block; width: 100%; } .legal-table thead { display: none; } .legal-table td { border-top: 0; } .legal-table tr { border-top: 1px solid var(--line); } }
+
+/* Key-term notice and the indented dispute-resolution section */
+.legal-key-notice { margin: 4px 0 22px; padding: 12px 16px; border-left: 4px solid var(--blue); border-radius: 0 10px 10px 0; background: #eff4ff; color: var(--ink); font-size: 15px; }
+.legal-arbitration { margin: 30px 0 8px clamp(0px, 3vw, 28px); padding: clamp(16px, 3vw, 26px); border: 2px solid var(--ink); border-radius: 14px; background: #fafbfd; }
+.legal-arbitration h2 { margin-top: 0; text-transform: uppercase; letter-spacing: .02em; font-size: 18px; }
+.legal-arbitration-lead { padding: 10px 12px; border-radius: 8px; background: #fff3d6; color: #5c4306; }
+.legal-arbitration-terms { padding-left: 24px; }
+.legal-arbitration-terms li { margin: 10px 0; padding-left: 4px; }
+.legal-arbitration-note { margin-bottom: 0; color: var(--muted); font-size: 14px; }
