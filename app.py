@@ -689,7 +689,8 @@ def apply_company_scope(execute_state):
         g.resolving_company_scope = False
     statement = execute_state.statement
     for model in TENANT_MODELS:
-        if is_company_admin:
+        if is_company_admin or not hasattr(model, "project"):
+            # Records without a project (e.g. storage reservations) are scoped by company only.
             criterion = lambda entity: entity.company_id == company_id
         else:
             criterion = lambda entity: (entity.company_id == company_id) & entity.project.in_(assigned_projects)
@@ -781,6 +782,39 @@ def user_can_upload_project(project, company_id=None):
         return True
     return ProjectAssignment.query.filter_by(company_id=membership.company_id,
         user_id=current_user.id, project=project).first() is not None
+
+
+def company_role_is_admin():
+    membership = current_membership()
+    return bool(current_user.is_authenticated and (current_user.is_admin or
+                (membership and membership.role == "company_admin")))
+
+
+def require_project_editor(*projects):
+    """Company admins edit any company project; workers only projects assigned to them."""
+    for project in projects:
+        if not user_can_upload_project(project):
+            abort(403)
+
+
+def editor_projects():
+    """Projects the signed-in company member can add days, routes and documents to."""
+    membership = current_membership()
+    if not membership:
+        return []
+    names = company_project_names(membership.company_id)
+    if not company_role_is_admin():
+        assigned = {row.project for row in ProjectAssignment.query.filter_by(
+            company_id=membership.company_id, user_id=current_user.id).all()}
+        names = {name for name in names if name in assigned} | assigned
+    return sorted(names, key=str.casefold)
+
+
+def editor_return_url():
+    target = request.form.get("return_to", "")
+    if target.startswith(("/admin/upload", "/admin/site-capture")) and "//" not in target and "\\" not in target:
+        return target
+    return url_for("admin") if company_role_is_admin() else url_for("upload")
 
 
 def platform_owner_required(fn):
@@ -3835,16 +3869,30 @@ def protected_file(filename):
 def admin():
     if request.endpoint == "site_capture" and not company_feature_enabled("site_maps"):
         abort(403)
-    member_ids = [row.user_id for row in CompanyMembership.query.filter_by(company_id=current_company_id()).all()]
-    users = User.query.filter(User.id.in_(member_ids)).order_by(User.created_at.desc()).all() if member_ids else []
-    assignments = {}
-    for row in ProjectAssignment.query.filter_by(company_id=current_company_id()).all():
-        assignments.setdefault(row.user_id, set()).add(row.project)
-    flights = Flight.query.order_by(Flight.date.desc(), Flight.uploaded_at.desc()).limit(250).all()
-    docs = ProjectFile.query.order_by(ProjectFile.date.desc(), ProjectFile.uploaded_at.desc()).limit(250).all()
-    audit_logs = AuditLog.query.filter(AuditLog.user_id.in_(member_ids)).order_by(AuditLog.created_at.desc()).limit(100).all() if member_ids else []
-    project_names = company_project_names(current_company_id())
-    access_rows = {row.project: row for row in ProjectAccess.query.all()}
+    return render_capture_workspace(worker_mode=False)
+
+
+def render_capture_workspace(worker_mode=False):
+    """Admin page / site capture for company admins; the same site-capture workspace,
+    limited to assigned projects and without admin-only tools, for workers."""
+    if worker_mode:
+        project_names = set(editor_projects())
+        users, assignments, audit_logs, access_rows = [], {}, [], {}
+        flights = (Flight.query.filter(Flight.project.in_(project_names))
+                   .order_by(Flight.date.desc(), Flight.uploaded_at.desc()).limit(250).all()) if project_names else []
+        docs = (ProjectFile.query.filter(ProjectFile.project.in_(project_names))
+                .order_by(ProjectFile.date.desc(), ProjectFile.uploaded_at.desc()).limit(250).all()) if project_names else []
+    else:
+        member_ids = [row.user_id for row in CompanyMembership.query.filter_by(company_id=current_company_id()).all()]
+        users = User.query.filter(User.id.in_(member_ids)).order_by(User.created_at.desc()).all() if member_ids else []
+        assignments = {}
+        for row in ProjectAssignment.query.filter_by(company_id=current_company_id()).all():
+            assignments.setdefault(row.user_id, set()).add(row.project)
+        flights = Flight.query.order_by(Flight.date.desc(), Flight.uploaded_at.desc()).limit(250).all()
+        docs = ProjectFile.query.order_by(ProjectFile.date.desc(), ProjectFile.uploaded_at.desc()).limit(250).all()
+        audit_logs = AuditLog.query.filter(AuditLog.user_id.in_(member_ids)).order_by(AuditLog.created_at.desc()).limit(100).all() if member_ids else []
+        project_names = company_project_names(current_company_id())
+        access_rows = {row.project: row for row in ProjectAccess.query.all()}
     selected_map_project = request.args.get("map_project", "").strip()
     if selected_map_project not in project_names:
         selected_map_project = "Main Project" if "Main Project" in project_names else (sorted(project_names, key=str.casefold)[0] if project_names else "")
@@ -3869,11 +3917,14 @@ def admin():
     map_date = parse_date(request.args.get("map_date")) or latest_project_date or now_utc().date()
     map_paths = ProjectFlightPath.query.filter_by(project=selected_map_project, date=map_date).order_by(ProjectFlightPath.created_at).all() if selected_map_project else []
     map_project_flights = Flight.query.filter_by(project=selected_map_project, date=map_date).order_by(Flight.title).all() if selected_map_project else []
-    template_name = "site_capture.html" if request.path in {"/admin/site-capture", "/admin/upload"} else "admin.html"
+    template_name = "site_capture.html" if worker_mode or request.path in {"/admin/site-capture", "/admin/upload"} else "admin.html"
+    project_docs = [doc for doc in docs if doc.project == selected_map_project]
     return render_template(template_name, users=users, flights=flights, docs=docs, audit_logs=audit_logs,
+                           worker_mode=worker_mode, project_docs=project_docs,
                            project_names=sorted(project_names, key=str.casefold), access_rows=access_rows,
                            projects=sorted(project_names, key=str.casefold), directions=DIRECTIONS,
                            initial_view="uploads" if request.path == "/admin/upload" else "videos",
+                           workspace_url=url_for("upload") if worker_mode else url_for("site_capture"),
                            selected_map_project=selected_map_project, selected_site_map=selected_site_map,
                            selected_photo_reference=selected_photo_reference,
                            selected_photo_annotations=selected_photo_annotations,
@@ -4205,6 +4256,10 @@ def rotate_project_access_codes():
 @upload_user_required
 @company_feature_required("flight_scans")
 def upload():
+    if request.method == "GET" and not company_role_is_admin():
+        # Workers get the site-capture workspace for their assigned projects:
+        # upload footage for a day, draw routes, link videos, upload documents.
+        return render_capture_workspace(worker_mode=True)
     if request.method == "GET":
         project_names = {r[0] for r in db.session.query(Flight.project).distinct().all() if r[0]}
         project_names.update(r[0] for r in db.session.query(ProjectFile.project).distinct().all() if r[0])
@@ -4629,10 +4684,11 @@ def abort_r2_upload(upload_id):
 
 
 @app.post("/admin/projects/route-video")
-@admin_required
+@upload_user_required
 @company_feature_required("flight_scans")
 def upload_route_video():
     project = request.form.get("project", "").strip()[:160]
+    require_project_editor(project)
     date_value = parse_date(request.form.get("date", ""))
     video = request.files.get("video")
     title = request.form.get("title", "").strip()[:200]
@@ -4789,10 +4845,11 @@ def save_project_site_setup():
 
 
 @app.post("/admin/projects/paths")
-@admin_required
+@upload_user_required
 @company_feature_required("site_maps")
 def save_project_flight_path():
     project = request.form.get("project", "").strip()[:160]
+    require_project_editor(project)
     name = request.form.get("name", "").strip()[:160]
     label = request.form.get("label", "").strip()[:64]
     direction = request.form.get("direction", "Custom path").strip()[:40]
@@ -4856,11 +4913,12 @@ def save_project_flight_path():
 
 
 @app.post("/admin/projects/paths/<int:path_id>/delete")
-@admin_required
+@upload_user_required
 @company_feature_required("site_maps")
 def delete_project_flight_path(path_id):
     path = db.get_or_404(ProjectFlightPath, path_id)
     project, date_value = path.project, path.date
+    require_project_editor(project)
     db.session.delete(path)
     db.session.commit()
     audit("delete_flight_path", "project", project, f"Deleted route {path.name}")
@@ -4903,27 +4961,28 @@ def delete_project_pin(pin_id):
 
 
 @app.post("/admin/document")
-@admin_required
+@upload_user_required
 @company_feature_required("documents")
 def upload_document():
     date_value = parse_date(request.form.get("date"))
     name = request.form.get("name", "").strip()[:255]
     project = request.form.get("project", "Main Project").strip()[:160] or "Main Project"
+    require_project_editor(project)
     notes = request.form.get("notes", "").strip()
     tags = tags_from_request()
     file = request.files.get("file")
     if not date_value:
         flash("Choose a valid date.", "error")
-        return redirect(url_for("admin"))
+        return redirect(editor_return_url())
     if not name or not file or not file.filename:
         flash("Document name and file are required.", "error")
-        return redirect(url_for("admin"))
+        return redirect(editor_return_url())
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(url_for("admin"))
+        return redirect(editor_return_url())
     if not ext_allowed(file.filename, ALLOWED_DOCS):
         flash("That document type is not allowed.", "error")
-        return redirect(url_for("admin"))
+        return redirect(editor_return_url())
     stored = None
     try:
         stored = save_upload(file)
@@ -4932,7 +4991,7 @@ def upload_document():
             delete_stored_file(filename)
             release_storage_reservation(reservation_id)
             flash("That exact document already exists.", "error")
-            return redirect(url_for("admin"))
+            return redirect(editor_return_url())
         p = ProjectFile(
             date=date_value, name=name, filename=filename, category=extension(original).upper() or "Document",
             uploaded_by=current_user.id, project=project, tags=json.dumps(tags), notes=notes,
@@ -4950,19 +5009,21 @@ def upload_document():
             release_storage_reservation(stored[4])
         app.logger.exception("Document upload failed")
         flash(f"Document upload failed: {exc}", "error")
-    return redirect(url_for("admin"))
+    return redirect(editor_return_url())
 
 
 @app.post("/admin/flight/<int:flight_id>/edit")
-@admin_required
+@upload_user_required
 def edit_flight(flight_id):
     flight = db.get_or_404(Flight, flight_id)
+    require_project_editor(flight.project)
     flight.title = request.form.get("title", flight.title).strip()[:200] or flight.title
     flight.description = request.form.get("description", flight.description).strip()
     target_project = request.form.get("project", flight.project).strip()[:160] or "Main Project"
+    require_project_editor(flight.project, target_project)
     if target_project != flight.project and not project_capacity_available(target_project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(url_for("admin"))
+        return redirect(editor_return_url())
     flight.project = target_project
     flight.area = request.form.get("area", flight.area).strip()[:160]
     flight.direction = request.form.get("direction", flight.direction).strip()
@@ -4979,26 +5040,28 @@ def edit_flight(flight_id):
     db.session.commit()
     audit("edit", "flight", flight.id, f"Updated metadata; tags={flight.tag_list}")
     flash("Flight metadata updated.", "success")
-    return redirect(url_for("admin"))
+    return redirect(editor_return_url())
 
 
 @app.post("/admin/document/<int:doc_id>/edit")
-@admin_required
+@upload_user_required
 @company_feature_required("documents")
 def edit_document(doc_id):
     doc = db.get_or_404(ProjectFile, doc_id)
+    require_project_editor(doc.project)
     doc.name = request.form.get("name", doc.name).strip()[:255] or doc.name
     target_project = request.form.get("project", doc.project).strip()[:160] or "Main Project"
+    require_project_editor(doc.project, target_project)
     if target_project != doc.project and not project_capacity_available(target_project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(url_for("admin"))
+        return redirect(editor_return_url())
     doc.project = target_project
     doc.tags = json.dumps(tags_from_request())
     doc.notes = request.form.get("notes", doc.notes).strip()
     db.session.commit()
     audit("edit", "document", doc.id, f"Updated metadata; tags={doc.tag_list}")
     flash("Document metadata updated.", "success")
-    return redirect(url_for("admin"))
+    return redirect(editor_return_url())
 
 
 @app.post("/admin/users/create")
