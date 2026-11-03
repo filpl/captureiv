@@ -122,3 +122,10 @@ body.viewer-page .viewer-compare { border-radius: 14px; }
   body.viewer-page .side-project { padding: 0 10px; justify-items: center; }
   body.viewer-page .side-project strong, body.viewer-page .side-project span { display: none; }
 }
+
+/* Polish: fit the tagline in the sidebar; blue accents instead of the old beige/green */
+body.viewer-page .viewer-logo-foot .civ-tag { font-size: 6.6px; letter-spacing: .09em; }
+body.viewer-page .date-rail :is(a, button, .date-item, li).selected,
+body.viewer-page .date-rail :is(a, button, .date-item, li).active,
+body.viewer-page .date-rail [aria-current] { background: var(--vr-blue-soft) !important; color: #1d5fd6; border-color: transparent; }
+body.viewer-page .eyebrow { color: #2f6fe0; }
