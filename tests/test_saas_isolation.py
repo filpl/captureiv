@@ -734,9 +734,9 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(unlocked.status_code, 302)
         viewer_page = visitor.get(unlocked.headers["Location"])
         self.assertEqual(viewer_page.status_code, 200)
-        self.assertIn(b"Drone footage", viewer_page.data)
+        self.assertIn(b"All flights", viewer_page.data)
         self.assertNotIn(b"Documents", viewer_page.data)
-        self.assertIn(b"Map", viewer_page.data)
+        self.assertIn(b"Flight Scans", viewer_page.data)
         self.assertIn(b"Photos", viewer_page.data)
 
         with portal.app.app_context():
