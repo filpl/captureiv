@@ -1,0 +1,123 @@
+/* Admin, Platform Owner and project-home layout. Scoped to .console and .project-hub
+   so other pages are unaffected. Uses the app palette from style.css. */
+
+/* ---- Section navigation (sticky chips under the page heading) ---- */
+.console-tabs{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:6px;margin:0 0 22px;padding:10px 0;background:#f8faf9;border-bottom:1px solid var(--line)}
+.console-tabs a{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px solid #dce2de;border-radius:999px;background:#fff;color:#36443c;font:600 13px 'DM Sans',sans-serif;text-decoration:none}
+.console-tabs a:hover{border-color:var(--green);color:var(--green)}
+.console-tabs .count{margin:0;vertical-align:0}
+.console-tabs .count.is-alert{background:#fde7c8;color:#7a4b0c}
+.console section[id],.console [id].console-section{scroll-margin-top:72px}
+
+/* ---- Headings and quick actions ---- */
+.console-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:18px}
+.console-heading h1{margin:0 0 6px}
+.console-heading .muted{margin:0}
+.quick-actions{display:flex;flex-wrap:wrap;gap:8px}
+.attention{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;margin:0 0 18px;border:1px solid #f0d4a8;border-radius:10px;background:#fff8ec;color:#6b4710;font-size:13px}
+.attention a{color:#6b4710;font-weight:700}
+.notice-link{padding:12px 16px;margin:0 0 18px;border:1px solid #bfe0cc;border-radius:10px;background:#eef8f2;color:#245e40;font-size:13px}
+.notice-link a{font-weight:700;color:#1e7657}
+
+/* ---- Panels ---- */
+.console-section{border:1px solid var(--line);border-radius:12px;background:#fff;padding:22px;margin:0 0 18px;min-width:0}
+.console-section>h2,.console-section .section-head h2{margin:0;font:700 18px Manrope,sans-serif;color:var(--ink)}
+.section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin:0 0 14px}
+.section-head p{margin:5px 0 0}
+.console .muted{font-size:13px;line-height:1.5}
+.console-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.console-two>.console-section{margin:0}
+@media(max-width:900px){.console-two{grid-template-columns:1fr}}
+
+/* ---- Forms: labelled fields in a responsive grid ---- */
+.field-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;margin:0 0 14px}
+.console label.field,.field-grid label{display:flex;flex-direction:column;gap:6px;color:#4d5a53;font-size:12px;font-weight:600}
+.console input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),.console select,.console textarea{width:100%;min-width:0;border:1px solid #d6ded9;border-radius:7px;background:#fff;padding:9px 11px;color:var(--ink);font:13px 'DM Sans',sans-serif}
+.console input[type=file]{font:12px 'DM Sans',sans-serif;max-width:100%}
+.console input:focus-visible,.console select:focus-visible,.console textarea:focus-visible{outline:2px solid #8cc7a6;outline-offset:1px;border-color:var(--green)}
+.console textarea{min-height:76px}
+.field-hint{color:#6b7871;font-size:11.5px;font-weight:500;line-height:1.4}
+.form-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.console details>summary{cursor:pointer;color:var(--green);font-weight:600;font-size:13px;list-style-position:inside}
+.console details[open]>summary{margin-bottom:12px}
+.subtle-card{border:1px solid #e3e9e5;border-radius:10px;background:#fbfcfb;padding:16px}
+
+/* ---- Checkbox lists (project pickers, service switches) ---- */
+.check-list{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;border:0}
+.check-list legend{width:100%;margin:0 0 6px;padding:0;color:#4d5a53;font-size:12px;font-weight:600}
+.check-chip{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid #d6ded9;border-radius:8px;background:#fff;font-size:13px;color:#2a3830;cursor:pointer}
+.check-chip:has(input:checked){border-color:var(--green);background:#eef8f2}
+.check-chip input{margin:0;accent-color:var(--green)}
+
+/* ---- Pills ---- */
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;background:#eef2ef;color:#45544b;font-size:11.5px;font-weight:700;white-space:nowrap}
+.pill.service{background:#e6f1fb;color:#1f5f9a}
+.pill.demo{background:#fdf0dc;color:#7a4b0c}
+.pill.ok{background:#e4f4e9;color:#226746}
+.pill.warn{background:#fde7c8;color:#7a4b0c}
+.pill.off{background:#f1f1f1;color:#7a7a7a}
+.status-pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;text-transform:capitalize;background:#eef2ef;color:#45544b}
+.status-pill.status-active{background:#e4f4e9;color:#226746}
+.status-pill.status-suspended{background:#fde3df;color:#9c3326}
+.status-pill.status-pending{background:#fdf0dc;color:#7a4b0c}
+
+/* ---- Owner: company cards ---- */
+.company-list{display:grid;gap:12px}
+.company-card{border:1px solid #e3e9e5;border-radius:12px;padding:16px;background:#fcfdfc}
+.company-top{display:grid;grid-template-columns:minmax(200px,1.4fr) minmax(150px,1fr) minmax(170px,1fr) auto;gap:16px;align-items:center}
+.company-name strong{display:block;font:700 15px Manrope,sans-serif;color:var(--ink)}
+.company-name .pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.company-meta span{display:block;font-size:12px;color:#5d6a63}
+.company-meta strong{display:block;font-size:13px;color:var(--ink)}
+.company-storage progress{width:100%;height:6px;margin:5px 0 2px;accent-color:var(--green)}
+.company-storage small{display:block;color:#6b7871;font-size:11.5px}
+.company-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center}
+.company-actions form{margin:0}
+.company-manage{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;padding-top:12px;border-top:1px dashed #e3e9e5}
+.company-manage details{flex:1 1 260px;min-width:0}
+.company-manage .subtle-card{margin-top:2px}
+.project-usage{display:grid;grid-template-columns:1fr auto;gap:4px 16px;font-size:12.5px}
+@media(max-width:900px){.company-top{grid-template-columns:1fr 1fr}.company-actions{grid-column:1/-1;justify-content:flex-start}}
+@media(max-width:560px){.company-top{grid-template-columns:1fr}}
+
+/* ---- Owner: readiness, requests and refunds ---- */
+.console .readiness-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.request-card,.refund-card{border:1px solid #e3e9e5;border-radius:12px;padding:16px;margin:0 0 12px;background:#fcfdfc}
+.request-card h3,.refund-card h3{margin:0 0 4px;font:700 15px Manrope,sans-serif}
+.request-card p,.refund-card p{margin:6px 0;font-size:13px;color:#4d5a53}
+.refund-meta{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:10px 0}
+.refund-meta span{display:block;font-size:11px;color:#6b7871}
+.refund-meta strong{font-size:13px}
+.plan-card{border:1px solid #e3e9e5;border-radius:12px;padding:14px 16px;margin:0 0 10px;background:#fcfdfc}
+.plan-card>summary{color:var(--ink);font:700 15px Manrope,sans-serif}
+
+/* ---- Admin: client access rows and team ---- */
+.access-list{display:grid;gap:10px}
+.access-item{border:1px solid #e3e9e5;border-radius:12px;padding:14px 16px;background:#fcfdfc}
+.access-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.access-head .access-name{flex:1 1 220px;min-width:0}
+.access-name strong{display:block;font:700 15px Manrope,sans-serif}
+.access-name span{font-size:12px;color:#5d6a63}
+.code-chip{font:700 15px/1 ui-monospace,Consolas,monospace;letter-spacing:.3em;padding:8px 10px;border-radius:8px;background:#eef2ef;color:#1f3a2c}
+.access-item details{margin-top:10px}
+.team-table{width:100%;border-collapse:collapse;font-size:13px}
+.team-table th{padding:8px 10px;text-align:left;color:#6b7871;font-size:11px;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+.team-table td{padding:12px 10px;vertical-align:top;border-bottom:1px solid #eef2ef}
+.team-table td small{display:block;color:#6b7871}
+.team-table form{margin:0}
+.activity-compact{display:grid;gap:8px;font-size:13px}
+.activity-compact div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #f0f3f1;padding-bottom:6px}
+.activity-compact span{color:#6b7871;text-align:right}
+
+/* ---- Project home (dashboard) ---- */
+.project-hub{margin:0 0 26px}
+.project-hub .section-head h2{margin:0;font:700 18px Manrope,sans-serif}
+.project-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.project-card{display:flex;flex-direction:column;gap:12px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:18px}
+.project-card h3{margin:0;font:700 16px Manrope,sans-serif;color:var(--ink)}
+.project-facts{display:grid;gap:6px;margin:0;padding:0;list-style:none;font-size:13px;color:#4d5a53}
+.project-facts li{display:flex;justify-content:space-between;gap:10px}
+.project-facts li span:last-child{color:#6b7871}
+.project-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
+.project-empty{border:1px dashed #cfd9d3;border-radius:12px;padding:22px;background:#fff;color:#4d5a53}
+.project-empty ol{margin:10px 0 0;padding-left:20px;line-height:1.8}

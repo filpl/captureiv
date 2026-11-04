@@ -227,6 +227,36 @@ class WalkthroughTests(unittest.TestCase):
                       data={"service_drone": "1", "service_walkthrough": "1"})
 
 
+    # ------------------------------------------------- project home and menus
+    def test_project_home_lists_only_projects_the_user_can_open(self):
+        admin_home = self.client_for("admin").get("/dashboard").get_data(as_text=True)
+        self.assertIn("Your projects", admin_home)
+        self.assertIn("Tower A", admin_home)
+        self.assertIn("Tower B", admin_home)
+        self.assertIn("/walkthrough/view?project=Tower+A", admin_home)
+        employee_home = self.client_for("employee").get("/dashboard").get_data(as_text=True)
+        self.assertIn("Tower A", employee_home)
+        self.assertNotIn("Tower B", employee_home)
+        self.assertIn("No projects assigned yet", self.client_for("outsider").get("/dashboard").get_data(as_text=True))
+
+    def test_menu_matches_each_role(self):
+        admin = self.client_for("admin").get("/dashboard").get_data(as_text=True)
+        self.assertIn(">Site capture</a>", admin)
+        self.assertIn(">Admin</a>", admin)
+        employee = self.client_for("employee").get("/dashboard").get_data(as_text=True)
+        self.assertIn(">Upload</a>", employee)
+        self.assertNotIn(">Admin</a>", employee)
+        self.assertNotIn(">Site capture</a>", employee)
+        self.assertNotIn(">Upload</a>", self.client_for("outsider").get("/dashboard").get_data(as_text=True))
+
+    def test_owner_page_opens_workspaces_and_never_prefills_a_customer(self):
+        page = self.client_for("owner").get("/owner").get_data(as_text=True)
+        self.assertIn("Open workspace", page)
+        self.assertIn('href="#owner-companies"', page)
+        self.assertNotIn('value="Clark Construction"', page)
+        self.assertNotIn("fortressmediaco", page)
+
+
 class WalkthroughMigrationTests(unittest.TestCase):
     def test_migration_adds_services_and_tables_without_touching_existing_rows(self):
         root = Path(__file__).resolve().parents[1]

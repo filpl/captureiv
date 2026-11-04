@@ -1,45 +1,171 @@
 {% extends 'base.html' %}
 {% block title %}Admin{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='admin-console.css') }}?v=2">{% endblock %}
 {% block content %}
-{% include "_upload_rights.html" %}
-<div class="page-heading">
-  <div><p class="eyebrow">CONTROL ROOM</p><h1>Administration</h1><p class="muted">Manage footage, project viewing, and team access.</p></div>
-  {% if features.flight_scans %}<a class="button primary" href="{{ url_for('upload') }}">＋ Upload footage</a>{% endif %}
-</div>
-
-{% if features.viewer_links %}<section class="panel admin-panel project-access-panel" id="project-access">
-  <div class="section-title"><div><h2>Project viewer access</h2><p class="muted">Create a share link and four-letter code for read-only project viewing.</p></div></div>
-  <form method="post" action="{{ url_for('create_project_access') }}" class="new-viewer-project">
-    <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><label for="new-viewer-project-name">New project viewer</label>
-    <input id="new-viewer-project-name" name="project" maxlength="160" placeholder="Project name" required>
-    <p class="muted">Client codes provide read-only access to project footage and downloads only.</p><label class="viewer-expiry">Client email addresses for weekly codes<input type="text" name="client_emails" autocomplete="off" placeholder="client@example.com, another@example.com"><small>Weekly codes are emailed only after SMTP is configured.</small></label><label class="viewer-expiry">Code expires on (optional)<input type="date" name="expires_on"></label>
-    <button class="button primary small">Create project and code</button>
-  </form>
-  <div class="access-project-list">
-    {% for project_name in project_names %}{% set access = access_rows.get(project_name) %}
-    <div class="access-project-row"><div class="file-info"><strong>{{ project_name }}</strong><span>{% if access and access.revoked_at %}Access revoked{% elif access and access.expires_at and access.expires_at <= current_time %}Link expired{% elif access and access.expires_at %}Expires {{ access.expires_at.strftime('%b %d, %Y') }}{% elif access %}Active viewer link{% else %}Not shared yet{% endif %}</span></div>
-      {% if access and not access.revoked_at and (not access.expires_at or access.expires_at > current_time) %}<code class="access-code-label">{{ access.code }}</code><a class="button secondary small" target="_blank" rel="noopener" href="{{ url_for('shared_project',token=access.share_token) }}">Open viewer ↗</a><button class="quiet copy-link" data-link="{{ url_for('shared_project',token=access.share_token,_external=True) }}">Copy link</button>{% elif access %}<span class="muted">{{ 'Revoked' if access.revoked_at else 'Expired' }}</span>{% endif %}
-      <form method="post" action="{{ url_for('create_project_access') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="project" value="{{ project_name }}"><p class="muted">Read-only drone footage and download access only.</p><label class="viewer-expiry">Client email addresses for weekly codes<input type="text" name="client_emails" autocomplete="off" value="{{ access.client_emails if access else '' }}" placeholder="client@example.com, another@example.com"><small>Weekly codes are emailed only after SMTP is configured.</small></label><label class="viewer-expiry">Code expires<input type="date" name="expires_on" value="{{ access.expires_at.strftime('%Y-%m-%d') if access and access.expires_at else '' }}"></label><button class="button {% if access and not access.revoked_at %}secondary{% else %}primary{% endif %} small">{% if access and not access.revoked_at %}Save / renew code{% else %}Create access code{% endif %}</button></form>{% if access and not access.revoked_at %}<form method="post" action="{{ url_for('revoke_project_access',access_id=access.id) }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet revoke-viewer">Revoke code</button></form>{% endif %}
+{% set client_sees = [] %}
+{% if features.flight_scans %}{% set _ = client_sees.append('drone footage') %}{% endif %}
+{% if features.photos %}{% set _ = client_sees.append('mapped photos') %}{% endif %}
+{% if nav_services.walkthrough %}{% set _ = client_sees.append('the site walkthrough (360° captures)') %}{% endif %}
+<section class="console admin-console">
+  <div class="console-heading">
+    <div><p class="eyebrow">CONTROL ROOM</p><h1>Administration</h1>
+      <p class="muted">Client access, team members and project files{% if nav_company %} for {{ nav_company.name }}{% endif %}.</p></div>
+    <div class="quick-actions">
+      {% if features.flight_scans %}<a class="button primary small" href="{{ url_for('upload') }}">＋ Upload footage</a>{% endif %}
+      {% if features.site_maps %}<a class="button secondary small" href="{{ url_for('site_capture') }}">Site capture</a>{% endif %}
+      {% if nav_services.walkthrough %}<a class="button secondary small" href="{{ url_for('walkthrough.index') }}">Walkthrough setup</a>{% endif %}
     </div>
-    {% else %}<p class="muted">No projects yet. Create one above, then upload footage or documents.</p>{% endfor %}
   </div>
-</section>{% endif %}
 
-<div class="admin-grid">
-  {% if features.employee_accounts %}<section class="panel admin-panel"><div class="section-title"><h2>Team members <span class="count">{{ users|length }}</span></h2></div>
-    {% if local_employee_invite_url %}<p class="flash success">Local invitation link: <a href="{{ local_employee_invite_url }}">Open one-time setup</a></p>{% endif %}
-    <p class="muted">Invite by work email. Each person sets their own password from a one-time link.</p>
-    <form class="inline-create" method="post" action="{{ url_for('create_user') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="email" name="email" placeholder="Work email" required><input name="name" placeholder="Full name" required><select name="projects" multiple aria-label="Projects for employee" title="Choose the projects this employee can access" size="2">{% for project in project_names %}<option value="{{ project }}">{{ project }}</option>{% endfor %}</select><label class="check"><input type="checkbox" name="is_admin"> Admin</label><button class="button primary small">Send invitation</button></form>
-    <div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Project access</th><th>Action</th></tr></thead><tbody>{% for user in users %}<tr><td><strong>{{ user.name }}</strong><small>{{ user.email or user.username }}</small></td><td>{{ 'Admin' if user.is_admin else 'Employee' }}</td><td><span class="status {{ 'active' if user.active else 'inactive' }}">{% if not user.email_verified %}Invite pending{% else %}{{ 'Active' if user.active else 'Disabled' }}{% endif %}</span></td><td>{% if user.is_admin %}<span class="muted">All company projects</span>{% else %}<form method="post" action="{{ url_for('update_user_projects',user_id=user.id) }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><select name="projects" multiple size="2" aria-label="Projects for {{ user.name }}">{% for project in project_names %}<option value="{{ project }}" {% if project in assignments.get(user.id,[]) %}selected{% endif %}>{{ project }}</option>{% endfor %}</select><button class="quiet">Save</button></form>{% endif %}</td><td>{% if user.id != current_user.id %}{% if not user.email_verified and user.email %}<form method="post" action="{{ url_for('resend_employee_invite',user_id=user.id) }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet">Resend invite</button></form>{% else %}<form method="post" action="{{ url_for('toggle_user',user_id=user.id) }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet">{{ 'Disable' if user.active else 'Enable' }}</button></form>{% endif %}{% else %}<span class="muted">You</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
-  </section>{% endif %}
-  <section class="panel admin-panel"><div class="section-title"><h2>Recent activity</h2></div><div class="activity-list">{% for log in audit_logs[:12] %}<div class="activity-row"><span class="activity-dot"></span><div><strong>{{ log.action|replace('_',' ')|title }}</strong><span>{{ log.detail or log.resource_type }} · {{ log.created_at.strftime('%b %d, %H:%M') }}</span></div></div>{% else %}<p class="muted">No activity recorded yet.</p>{% endfor %}</div></section>
-</div>
+  <nav class="console-tabs" aria-label="Admin sections">
+    {% if features.viewer_links %}<a href="#project-access">Client access <span class="count">{{ access_rows|length }}</span></a>{% endif %}
+    {% if features.employee_accounts %}<a href="#team">Team <span class="count">{{ users|length }}</span></a>{% endif %}
+    {% if features.documents %}<a href="#documents">Documents</a>{% endif %}
+    {% if features.flight_scans %}<a href="#recent-flights">Recent flights</a>{% endif %}
+    <a href="#activity">Activity</a>
+  </nav>
 
-{% if features.flight_scans %}<section class="panel admin-panel" id="recent-flights"><div class="section-title"><h2>Recent flights <span class="count">{{ flights|length }}</span></h2></div><div class="table-wrap"><table><thead><tr><th>Flight</th><th>Date</th><th>Project</th><th>Size</th><th></th></tr></thead><tbody>{% for flight in flights[:30] %}<tr><td><strong>{{ flight.title }}</strong><small>{{ flight.flight_id }}</small></td><td>{{ flight.date.strftime('%b %d, %Y') }}</td><td>{{ flight.project }}</td><td>{{ flight.file_size|filesize }}</td><td><a href="{{ url_for('flight_view',flight_id=flight.id) }}">View →</a></td></tr>{% else %}<tr><td colspan="5" class="muted">No flights uploaded yet.</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
+  {% if local_employee_invite_url %}<div class="notice-link">Local invitation link: <a href="{{ local_employee_invite_url }}">Open one-time setup</a> — send this link to the new team member (shown because email is not configured).</div>{% endif %}
+  {% include "_upload_rights.html" %}
 
-{% if features.documents %}<section class="panel admin-panel"><div class="section-title"><h2>Upload a project document</h2></div><form method="post" action="{{ url_for('upload_document') }}" enctype="multipart/form-data" class="inline-create doc-upload"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="date" name="date" required><input name="name" placeholder="Document name" required><input name="project" value="Main Project" placeholder="Project"><input name="tags" placeholder="Tags"><input type="file" name="file" required><button class="button primary small">Upload document</button></form><div class="document-list">{% for doc in docs[:10] %}<div class="document-row"><div class="file-icon">{{ doc.category[:4] }}</div><div class="file-info"><strong>{{ doc.name }}</strong><span>{{ doc.project }} · {{ doc.date.strftime('%b %d, %Y') }}</span></div><a href="{{ url_for('protected_file',filename=doc.filename,download=1) }}">Download ↓</a></div>{% else %}<p class="muted">No documents uploaded.</p>{% endfor %}</div></section>{% endif %}
+  {% if features.viewer_links %}
+  <section class="console-section project-access-panel" id="project-access">
+    <div class="section-head"><div><h2>Client access</h2>
+      <p class="muted">Each project gets a share link and a four-letter code. Clients get a read-only view{% if client_sees %} of {{ client_sees|join(', ') }}{% endif %} — never documents or editing.</p></div></div>
+    <details class="subtle-card new-viewer-project"{% if not project_names %} open{% endif %}><summary>＋ New project and client code</summary>
+      <form method="post" action="{{ url_for('create_project_access') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <div class="field-grid">
+          <label for="new-viewer-project-name">Project name<input id="new-viewer-project-name" name="project" maxlength="160" placeholder="e.g. Harbor Street Offices" required></label>
+          <label>Client emails for weekly codes (optional)<input type="text" name="client_emails" autocomplete="off" placeholder="client@example.com, another@example.com"><span class="field-hint">Emailed only after SMTP is configured.</span></label>
+          <label>Code expires on (optional)<input type="date" name="expires_on"></label>
+        </div>
+        <button class="button primary small">Create project and code</button>
+      </form>
+    </details>
+    <div class="access-list" style="margin-top:12px">
+      {% for project_name in project_names %}{% set access = access_rows.get(project_name) %}{% set live = access and not access.revoked_at and (not access.expires_at or access.expires_at > current_time) %}
+      <article class="access-item">
+        <div class="access-head">
+          <div class="access-name"><strong>{{ project_name }}</strong>
+            <span>{% if access and access.revoked_at %}Access revoked{% elif access and access.expires_at and access.expires_at <= current_time %}Link expired{% elif access and access.expires_at %}Active · expires {{ access.expires_at.strftime('%b %d, %Y') }}{% elif access %}Active viewer link{% else %}Not shared yet{% endif %}</span></div>
+          {% if live %}
+          <code class="code-chip access-code-label" aria-label="Client code">{{ access.code }}</code>
+          <a class="button secondary small" target="_blank" rel="noopener" href="{{ url_for('shared_project',token=access.share_token) }}">Open viewer ↗</a>
+          <button class="button secondary small copy-link" type="button" data-link="{{ url_for('shared_project',token=access.share_token,_external=True) }}">Copy link</button>
+          {% endif %}
+        </div>
+        <details{% if not access %} open{% endif %}><summary>{% if live %}Code settings &amp; renewal{% else %}Create a client code{% endif %}</summary>
+          <form method="post" action="{{ url_for('create_project_access') }}" class="subtle-card"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="project" value="{{ project_name }}">
+            <div class="field-grid">
+              <label class="viewer-expiry">Client emails for weekly codes<input type="text" name="client_emails" autocomplete="off" value="{{ access.client_emails if access else '' }}" placeholder="client@example.com, another@example.com"><span class="field-hint">Emailed only after SMTP is configured.</span></label>
+              <label class="viewer-expiry">Code expires<input type="date" name="expires_on" value="{{ access.expires_at.strftime('%Y-%m-%d') if access and access.expires_at else '' }}"></label>
+            </div>
+            <div class="form-actions">
+              <button class="button {% if access and not access.revoked_at %}secondary{% else %}primary{% endif %} small">{% if access and not access.revoked_at %}Save / renew code{% else %}Create access code{% endif %}</button>
+              <span class="field-hint">Renewing issues a new code and link; the old ones stop working.</span>
+            </div>
+          </form>
+          {% if access and not access.revoked_at %}
+          <form method="post" action="{{ url_for('revoke_project_access',access_id=access.id) }}" style="margin-top:10px"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet revoke-viewer">Revoke code</button></form>
+          {% endif %}
+        </details>
+      </article>
+      {% else %}<p class="muted">No projects yet. Create one above, then upload footage, documents or walkthrough drawings.</p>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if features.employee_accounts %}
+  <section class="console-section" id="team">
+    <div class="section-head"><div><h2>Team members <span class="count">{{ users|length }}</span></h2>
+      <p class="muted">Invite by work email. Each person sets their own password from a one-time link. Employees only see the projects you tick.</p></div></div>
+    <details class="subtle-card"{% if users|length <= 1 %} open{% endif %}><summary>＋ Invite a team member</summary>
+      <form method="post" action="{{ url_for('create_user') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <div class="field-grid">
+          <label>Work email<input type="email" name="email" placeholder="name@company.com" required></label>
+          <label>Full name<input name="name" placeholder="Full name" required></label>
+        </div>
+        {% if project_names %}
+        <fieldset class="check-list" style="margin-bottom:12px"><legend>Projects this employee can open</legend>
+          {% for project in project_names %}<label class="check-chip"><input type="checkbox" name="projects" value="{{ project }}"> {{ project }}</label>{% endfor %}
+        </fieldset>
+        {% endif %}
+        <div class="form-actions">
+          <label class="check-chip"><input type="checkbox" name="is_admin"> Company admin (all projects, can manage the team)</label>
+          <button class="button primary small">Send invitation</button>
+        </div>
+      </form>
+    </details>
+    <div class="table-wrap" style="margin-top:14px">
+      <table class="team-table">
+        <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Project access</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for user in users %}{% set mine = assignments.get(user.id,[]) %}
+          <tr>
+            <td><strong>{{ user.name }}</strong><small>{{ user.email or user.username }}</small></td>
+            <td>{{ 'Admin' if user.is_admin else 'Employee' }}</td>
+            <td><span class="status {{ 'active' if user.active else 'inactive' }}">{% if not user.email_verified %}Invite pending{% else %}{{ 'Active' if user.active else 'Disabled' }}{% endif %}</span></td>
+            <td>{% if user.is_admin %}<span class="muted">All company projects</span>{% else %}
+              <details><summary>{{ mine|length }} project{{ '' if mine|length == 1 else 's' }}</summary>
+                <form method="post" action="{{ url_for('update_user_projects',user_id=user.id) }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                  <fieldset class="check-list" aria-label="Projects for {{ user.name }}">
+                    {% for project in project_names %}<label class="check-chip"><input type="checkbox" name="projects" value="{{ project }}" {% if project in mine %}checked{% endif %}> {{ project }}</label>{% endfor %}
+                  </fieldset>
+                  <button class="button secondary small" style="margin-top:8px">Save projects</button>
+                </form>
+              </details>{% endif %}</td>
+            <td>{% if user.id != current_user.id %}
+              {% if not user.email_verified and user.email %}
+              <form method="post" action="{{ url_for('resend_employee_invite',user_id=user.id) }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet">Resend invite</button></form>
+              {% else %}
+              <form method="post" action="{{ url_for('toggle_user',user_id=user.id) }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet">{{ 'Disable' if user.active else 'Enable' }}</button></form>
+              {% endif %}{% else %}<span class="muted">You</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if features.documents %}
+  <section class="console-section" id="documents">
+    <div class="section-head"><div><h2>Project documents</h2><p class="muted">Documents are for your company only; clients never see them.</p></div></div>
+    <details class="subtle-card"><summary>＋ Upload a project document</summary>
+      <form method="post" action="{{ url_for('upload_document') }}" enctype="multipart/form-data" class="doc-upload"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <div class="field-grid">
+          <label>Project{% if project_names %}<select name="project" required>{% for project in project_names %}<option value="{{ project }}">{{ project }}</option>{% endfor %}</select>{% else %}<input name="project" placeholder="Project name" required>{% endif %}</label>
+          <label>Document date<input type="date" name="date" value="{{ current_time.strftime('%Y-%m-%d') }}" required></label>
+          <label>Document name<input name="name" placeholder="e.g. Level 3 inspection report" required></label>
+          <label>Tags (optional)<input name="tags" placeholder="inspection, level 3"></label>
+          <label>File<input type="file" name="file" required></label>
+        </div>
+        <button class="button primary small">Upload document</button>
+      </form>
+    </details>
+    <div class="document-list" style="margin-top:12px">
+      {% for doc in docs[:10] %}<div class="document-row"><div class="file-icon">{{ doc.category[:4] }}</div><div class="file-info"><strong>{{ doc.name }}</strong><span>{{ doc.project }} · {{ doc.date.strftime('%b %d, %Y') }}</span></div><a href="{{ url_for('protected_file',filename=doc.filename,download=1) }}">Download ↓</a></div>{% else %}<p class="muted">No documents uploaded.</p>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if features.flight_scans %}
+  <section class="console-section" id="recent-flights">
+    <div class="section-head"><h2>Recent flights <span class="count">{{ flights|length }}</span></h2>{% if flights %}<a class="quiet" href="{{ url_for('dashboard') }}">Open flight archive →</a>{% endif %}</div>
+    <div class="table-wrap"><table class="team-table"><thead><tr><th>Flight</th><th>Date</th><th>Project</th><th>Size</th><th></th></tr></thead><tbody>
+      {% for flight in flights[:30] %}<tr><td><strong>{{ flight.title }}</strong><small>{{ flight.flight_id }}</small></td><td>{{ flight.date.strftime('%b %d, %Y') }}</td><td>{{ flight.project }}</td><td>{{ flight.file_size|filesize }}</td><td><a href="{{ url_for('flight_view',flight_id=flight.id) }}">View →</a></td></tr>{% else %}<tr><td colspan="5" class="muted">No flights uploaded yet.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+  {% endif %}
+
+  <section class="console-section" id="activity">
+    <div class="section-head"><h2>Recent activity</h2></div>
+    <div class="activity-compact">
+      {% for log in audit_logs[:12] %}<div><strong>{{ log.action|replace('_',' ')|title }}</strong><span>{{ log.detail or log.resource_type }} · {{ log.created_at.strftime('%b %d, %H:%M') }}</span></div>{% else %}<p class="muted">No activity recorded yet.</p>{% endfor %}
+    </div>
+  </section>
+</section>
 <script>
-document.querySelectorAll('.copy-link').forEach(button=>button.addEventListener('click',async()=>{await navigator.clipboard.writeText(button.dataset.link);button.textContent='Copied';setTimeout(()=>button.textContent='Copy link',1200)}));
+document.querySelectorAll('.copy-link').forEach(button=>button.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(button.dataset.link);button.textContent='Copied'}catch(e){button.textContent='Copy failed'}setTimeout(()=>button.textContent='Copy link',1400)}));
 </script>
 {% endblock %}
-

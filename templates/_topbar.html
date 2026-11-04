@@ -1,12 +1,18 @@
 <header class="topbar platform-topbar">
   <a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-mark">△</span><span>CAPTURE IV<small>Intelligence Visuals</small></span></a>
   <nav class="platform-nav" aria-label="Main navigation">
-    {% set links = [('archive', 'dashboard', 'Archive')] %}
+    {% set links = [] %}
     {% if g.retrieval_only %}{% set links = [('archive', 'retrieve_workspace', 'Retrieve files')] %}
     {% else %}
-      {% if nav_services.walkthrough %}{% set links = links + [('walkthrough', 'walkthrough.index', 'Walkthrough')] %}{% endif %}
-      {% if current_user.is_admin %}{% set links = links + [('admin', 'admin', 'Admin')] %}{% if nav_services.drone is not defined or nav_services.drone %}{% set links = links + [('upload', 'upload', 'Upload')] %}{% endif %}
-        {% if not current_user.platform_owner %}{% set links = links + [('billing', 'billing_portal', 'Billing')] %}{% endif %}
+      {# The Platform Owner sees company pages only after choosing a company workspace. #}
+      {% if nav_company or not current_user.platform_owner %}
+        {% set links = [('archive', 'dashboard', 'Projects')] %}
+        {% if nav_services.walkthrough %}{% set links = links + [('walkthrough', 'walkthrough.index', 'Walkthrough')] %}{% endif %}
+        {% if nav_tools.site_capture %}{% set links = links + [('capture', 'site_capture', 'Site capture')] %}{% endif %}
+        {% if nav_tools.upload %}{% set links = links + [('upload', 'upload', 'Upload')] %}{% endif %}
+        {% if current_user.is_admin %}{% set links = links + [('admin', 'admin', 'Admin')] %}
+          {% if not current_user.platform_owner %}{% set links = links + [('billing', 'billing_portal', 'Billing')] %}{% endif %}
+        {% endif %}
       {% endif %}
       {% if current_user.platform_owner %}{% set links = links + [('sandbox', 'fieldview_sandbox', 'Sandbox')] %}{% endif %}
       {% if current_user.platform_owner %}{% set links = links + [('owner', 'platform_owner_dashboard', 'Platform Owner')] %}{% endif %}
@@ -19,7 +25,7 @@
   {% if current_user.platform_owner and owner_workspace_choices %}
   <form class="owner-workspace-switch" method="post" action="{{ url_for('select_owner_workspace') }}">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-    <input type="hidden" name="next_endpoint" value="{{ request.endpoint if request.endpoint in ['dashboard','admin','upload','site_capture','fieldview_sandbox'] else 'dashboard' }}">
+    <input type="hidden" name="next_endpoint" value="{{ request.endpoint if request.endpoint in ['dashboard','admin','upload','site_capture','fieldview_sandbox','walkthrough.index'] else 'dashboard' }}">
     <label for="owner-workspace">Company workspace</label>
     <select id="owner-workspace" name="company_id" required><option value="" disabled{% if not nav_company %} selected{% endif %}>Choose a company</option>{% for company in owner_workspace_choices %}<option value="{{ company.id }}"{% if nav_company and nav_company.id == company.id %} selected{% endif %}>{{ company.name }}</option>{% endfor %}</select>
     <button type="submit" class="quiet">Open workspace</button>

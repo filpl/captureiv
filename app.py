@@ -971,6 +971,8 @@ def navigation_context():
         section = "upload"
     elif endpoint == "billing_portal":
         section = "billing"
+    elif endpoint == "site_capture":
+        section = "capture"
     elif request.path.startswith("/admin"):
         section = "admin"
     elif request.path.startswith("/walkthrough"):
@@ -979,9 +981,17 @@ def navigation_context():
         section = "archive"
     membership = current_membership()
     company_id = membership.company_id if membership else None
+    # Which work tools the menu offers this user (the routes enforce the same rules).
+    nav_tools = {}
+    if company_id and current_user.is_authenticated:
+        nav_tools["site_capture"] = bool(current_user.is_admin and company_feature_enabled("site_maps", company_id))
+        nav_tools["upload"] = bool(company_feature_enabled("flight_scans", company_id) and (
+            current_user.is_admin or ProjectAssignment.query.filter_by(
+                company_id=company_id, user_id=current_user.id).first() is not None))
     return {"nav_section": section, "nav_company": membership.company if membership else None,
             "nav_services": {key: company_service_enabled(key, company_id) for key in COMPANY_SERVICES}
                 if company_id else {},
+            "nav_tools": nav_tools,
             "owner_workspace_choices": Company.query.filter_by(status="active").order_by(Company.name).all()
                 if current_user.is_authenticated and current_user.platform_owner and current_user.active else []}
 
@@ -3363,7 +3373,7 @@ def create_owner_company():
         flash("Enterprise workspace created. A secure setup invitation was sent; access stays pending until verified Stripe payment.", "success")
     elif os.environ.get("APP_ENV", "development") != "production":
         session["local_enterprise_setup_url"] = setup_url
-        flash("Workspace created pending billing. SMTP is not configured; use the local setup link shown above.", "success")
+        flash("Workspace created pending billing. SMTP is not configured; use the local setup link shown below.", "success")
     else:
         flash("Workspace created pending billing, but the setup email could not be delivered. Configure SMTP and resend from the request record.", "error")
     audit("company_manually_provisioned", "company", company.id,
@@ -3568,7 +3578,7 @@ def resend_manual_company_invite(company_id):
         flash("A new secure setup invitation was sent.", "success")
     elif os.environ.get("APP_ENV", "development") != "production":
         session["local_enterprise_setup_url"] = setup_url
-        flash("SMTP is not configured. Use the local setup link shown above.", "success")
+        flash("SMTP is not configured. Use the local setup link shown below.", "success")
     else:
         flash("The invitation could not be delivered. Check SMTP settings and try again.", "error")
     audit("company_setup_invite_resent", "company", company.id, "Manual Enterprise setup invitation resent")
@@ -3861,6 +3871,9 @@ def dashboard():
 
     available_dates = ([r[0] for r in Flight.query.with_entities(Flight.date).distinct().order_by(Flight.date.desc()).all()]
                        if features["flight_scans"] else [])
+    if not selected_date and project and features["flight_scans"]:
+        # Opening one project's flights starts on that project's latest flight date.
+        selected_date = db.session.query(func.max(Flight.date)).filter(Flight.project == project).scalar()
     if not selected_date:
         selected_date = available_dates[0] if available_dates else now_utc().date()
 
@@ -3937,7 +3950,8 @@ def dashboard():
                                         (not latest_refund_request or latest_refund_request.status not in OPEN_REFUND_STATUSES)),
         }
     return render_template(
-        "dashboard.html", flights=flights, docs=docs, dates=available_dates,
+        "dashboard.html", project_cards=project_overview(current_company_id(), features),
+        flights=flights, docs=docs, dates=available_dates,
         selected_date=selected_date, directions=DIRECTIONS, projects=projects,
         selected_project=project, selected_direction=direction, selected_tag=tag, search_query=q,
         storage_used=storage_used, storage_limit=storage_limit,
@@ -3947,6 +3961,41 @@ def dashboard():
         can_upload=bool(features["flight_scans"] and (current_user.is_admin or (membership and ProjectAssignment.query.filter_by(
             company_id=membership.company_id, user_id=current_user.id).first()))),
     )
+
+
+def project_overview(company_id, features):
+    """Per-project summary for the project home, limited to projects this user can see."""
+    if not company_id:
+        return []
+    names = sorted(company_project_names(company_id))
+    if not names:
+        return []
+
+    def grouped(model, date_column):
+        rows = (db.session.query(model.project, func.count(model.id), func.max(date_column))
+                .filter(model.company_id == company_id, model.project.in_(names))
+                .group_by(model.project).all())
+        return {name: (count, latest) for name, count, latest in rows}
+
+    walkthrough_on = company_service_enabled("walkthrough", company_id)
+    flights = grouped(Flight, Flight.date) if features.get("flight_scans") else {}
+    walks = grouped(WalkthroughSession, WalkthroughSession.capture_date) if walkthrough_on else {}
+    drawings = grouped(WalkthroughSheet, WalkthroughSheet.uploaded_at) if walkthrough_on else {}
+    documents = grouped(ProjectFile, ProjectFile.date) if features.get("documents") else {}
+    access = ({row.project: row for row in ProjectAccess.query.filter_by(company_id=company_id).all()}
+              if current_user.is_admin and features.get("viewer_links") else {})
+    cards = []
+    for name in names:
+        row = access.get(name)
+        cards.append({
+            "name": name,
+            "flights": flights.get(name, (0, None)),
+            "walks": walks.get(name, (0, None)),
+            "drawings": drawings.get(name, (0, None))[0],
+            "documents": documents.get(name, (0, None))[0],
+            "access": row if row and viewer_access_active(row) else None,
+        })
+    return cards
 
 
 @app.get("/flight/<int:flight_id>")
@@ -5276,7 +5325,7 @@ def create_user():
         flash("Employee invitation sent. They can set their own password using the email link.", "success")
     elif os.environ.get("APP_ENV", "development") != "production":
         session["local_employee_invite_url"] = invite_url
-        flash("SMTP is not configured. Use the local one-time invitation link shown above.", "success")
+        flash("SMTP is not configured. Use the one-time invitation link shown below.", "success")
     else:
         flash("The employee account is pending, but the invitation email could not be delivered. Resend it after SMTP is configured.", "error")
     audit("invite_user", "user", u.id, f"Invited {email}; admin={is_admin}")
@@ -5346,7 +5395,7 @@ def resend_employee_invite(user_id):
         flash("A new one-time invitation was emailed.", "success")
     elif os.environ.get("APP_ENV", "development") != "production":
         session["local_employee_invite_url"] = invite_url
-        flash("SMTP is not configured. Use the replacement local invitation link shown above.", "success")
+        flash("SMTP is not configured. Use the replacement invitation link shown below.", "success")
     else:
         flash("The invitation could not be delivered. Check SMTP settings and try again.", "error")
     audit("employee_invite_resent", "user", user.id, "Rotated pending invitation token")
