@@ -4,6 +4,7 @@
   "main": "dist/server/index.js",
   "compatibility_date": "2026-10-19",
   "build": {"command": "npm run build"},
+  "assets": {"directory": "dist/public", "binding": "ASSETS"},
   "d1_databases": [{
     "binding": "DB",
     "database_name": "construct-iv-inquiries",
