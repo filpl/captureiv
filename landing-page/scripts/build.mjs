@@ -38,7 +38,22 @@ export default {async fetch(request,env){
  if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405,headers:{Allow:'GET, HEAD'}});
  let key=aliases[url.pathname.replace(/\\/$/,'')||'/']||url.pathname;
  const asset=assets[key];
- if(!asset&&env&&env.ASSETS)return env.ASSETS.fetch(request);
+ if(!asset&&env&&env.ASSETS){
+  if(/\\.(?:mp4|webm|mov)$/i.test(url.pathname)){
+   const full=await env.ASSETS.fetch(new Request(url.origin+url.pathname));
+   if(full.status!==200)return full;
+   const vbytes=new Uint8Array(await full.arrayBuffer());const vsize=vbytes.length;const vtype=full.headers.get('Content-Type')||'video/mp4';
+   const vrange=/^bytes=(\\d*)-(\\d*)$/.exec(request.headers.get('Range')||'');
+   if(vrange){
+    let vstart=vrange[1]===''?vsize-Number(vrange[2]):Number(vrange[1]);let vend=vrange[1]===''||vrange[2]===''?vsize-1:Number(vrange[2]);
+    if(!(vstart>=0&&vstart<=vend&&vstart<vsize))return new Response(null,{status:416,headers:{'Content-Range':'bytes */'+vsize,'Accept-Ranges':'bytes'}});
+    vend=Math.min(vend,vsize-1);
+    return new Response(request.method==='HEAD'?null:vbytes.slice(vstart,vend+1),{status:206,headers:{'Content-Type':vtype,'Content-Range':'bytes '+vstart+'-'+vend+'/'+vsize,'Content-Length':String(vend-vstart+1),'Accept-Ranges':'bytes','Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'}});
+   }
+   return new Response(request.method==='HEAD'?null:vbytes,{headers:{'Content-Type':vtype,'Content-Length':String(vsize),'Accept-Ranges':'bytes','Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'}});
+  }
+  return env.ASSETS.fetch(request);
+ }
  if(!asset)return new Response('Page not found. Return to Capture IV at /.',{status:404,headers:{'Content-Type':'text/plain; charset=utf-8'}});
  const bytes=Uint8Array.from(atob(asset.base64),c=>c.charCodeAt(0));
  const range=/^bytes=(\\d*)-(\\d*)$/.exec(request.headers.get('Range')||'');
