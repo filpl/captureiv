@@ -9,8 +9,8 @@ const signupURL=process.env.PLATFORM_SIGNUP_URL || config.platformSignupUrl;
 const enterpriseURL=process.env.PLATFORM_ENTERPRISE_URL || config.platformEnterpriseUrl;
 function validatePlatformURL(value,label){const parsed=new URL(value,'https://construct.example');if(!((value.startsWith('/')&&!value.startsWith('//'))||parsed.protocol==='https:'||parsed.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(parsed.hostname)))throw Error(`Use an HTTPS ${label} URL or a same-origin path.`);return value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const htmlURL=validatePlatformURL(loginURL,'login'),htmlSignupURL=validatePlatformURL(signupURL,'signup'),htmlEnterpriseURL=validatePlatformURL(enterpriseURL,'enterprise request');
-const assets={};const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png'};
-const versions=Object.fromEntries(['site.css','site.js'].map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(web,file))).digest('hex').slice(0,12)]));
+const assets={};const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.mp4':'video/mp4'};
+const versions=Object.fromEntries(['site.css','site-theme.css','site.js'].map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(web,file))).digest('hex').slice(0,12)]));
 for(const file of fs.readdirSync(web)){
  const type=types[path.extname(file)];if(!type)continue;
  let bytes=fs.readFileSync(path.join(web,file));
@@ -30,7 +30,14 @@ export default {async fetch(request,env){
  const asset=assets[key];
  if(!asset)return new Response('Page not found. Return to Capture IV at /.',{status:404,headers:{'Content-Type':'text/plain; charset=utf-8'}});
  const bytes=Uint8Array.from(atob(asset.base64),c=>c.charCodeAt(0));
- return new Response(request.method==='HEAD'?null:bytes,{headers:{'Content-Type':asset.type,'Cache-Control':key.endsWith('.html')?'no-cache':'public, max-age=3600','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN'}});
+ const range=/^bytes=(\\d*)-(\\d*)$/.exec(request.headers.get('Range')||'');
+ if(range&&asset.type.startsWith('video/')){
+  const size=bytes.length;let start=range[1]===''?size-Number(range[2]):Number(range[1]);let end=range[1]===''||range[2]===''?size-1:Number(range[2]);
+  if(!(start>=0&&start<=end&&start<size))return new Response(null,{status:416,headers:{'Content-Range':'bytes */'+size}});
+  end=Math.min(end,size-1);
+  return new Response(request.method==='HEAD'?null:bytes.slice(start,end+1),{status:206,headers:{'Content-Type':asset.type,'Content-Range':'bytes '+start+'-'+end+'/'+size,'Content-Length':String(end-start+1),'Accept-Ranges':'bytes','Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'}});
+ }
+ return new Response(request.method==='HEAD'?null:bytes,{headers:{'Accept-Ranges':asset.type.startsWith('video/')?'bytes':'none','Content-Type':asset.type,'Cache-Control':key.endsWith('.html')?'no-cache':'public, max-age=3600','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN'}});
 }};
 `;
 const worker='const assets='+JSON.stringify(assets)+';\n'+contactSource+'\n'+router;
