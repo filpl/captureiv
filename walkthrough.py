@@ -6,6 +6,7 @@ and project scoping, upload storage and client share codes.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import re
@@ -179,9 +180,13 @@ def create_walkthrough_blueprint(core):
         return error("Upload failed. Please try again.", 500)
 
     # -------------------------------------------------------------- serialize
-    def file_url(kind, item_id, token):
-        return url_for("walkthrough.file", kind=kind, item_id=item_id, share=token) if token else \
-            url_for("walkthrough.file", kind=kind, item_id=item_id)
+    def file_url(kind, item, token):
+        # The version tag changes with the stored file, so a reused record id can never
+        # show a browser's cached copy of a different, deleted file.
+        params = {"kind": kind, "item_id": item.id, "v": hashlib.sha256(item.filename.encode()).hexdigest()[:12]}
+        if token:
+            params["share"] = token
+        return url_for("walkthrough.file", **params)
 
     def project_payload(company_id, project, token=None):
         sheets = (Sheet.query.filter_by(company_id=company_id, project=project)
@@ -196,7 +201,7 @@ def create_walkthrough_blueprint(core):
         for item in media:
             media_by_point.setdefault(item.point_id, []).append({
                 "id": item.id, "kind": item.kind, "name": item.original_filename,
-                "url": file_url("media", item.id, token)})
+                "url": file_url("media", item, token)})
         points_by_session = {}
         for point in points:
             points_by_session.setdefault(point.session_id, []).append({
@@ -207,9 +212,9 @@ def create_walkthrough_blueprint(core):
         return {
             "project": project,
             "sheets": [{"id": s.id, "floor": s.floor, "name": s.name, "kind": s.kind, "page": s.page,
-                        "url": file_url("sheet", s.id, token)} for s in sheets],
+                        "url": file_url("sheet", s, token)} for s in sheets],
             "models": [{"id": m.id, "floor": m.floor, "name": m.name,
-                        "url": file_url("model", m.id, token)} for m in models],
+                        "url": file_url("model", m, token)} for m in models],
             "sessions": [{"id": s.id, "sheet_id": s.sheet_id, "name": s.name,
                           "date": s.capture_date.isoformat(), "color": s.color,
                           "points": points_by_session.get(s.id, [])} for s in sessions],
