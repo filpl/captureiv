@@ -7,6 +7,8 @@ const config=JSON.parse(fs.readFileSync('site.config.json','utf8'));
 const loginURL=process.env.PLATFORM_LOGIN_URL || config.platformLoginUrl;
 const signupURL=process.env.PLATFORM_SIGNUP_URL || config.platformSignupUrl;
 const enterpriseURL=process.env.PLATFORM_ENTERPRISE_URL || config.platformEnterpriseUrl;
+// Legal policies live on the platform; the marketing site redirects its /privacy, /terms, etc. paths there.
+const legalURL=(process.env.PLATFORM_LEGAL_URL || config.platformLegalUrl || new URL('/legal',new URL(loginURL,'https://construct.example')).href).replace(/\/$/,'');
 function validatePlatformURL(value,label){const parsed=new URL(value,'https://construct.example');if(!((value.startsWith('/')&&!value.startsWith('//'))||parsed.protocol==='https:'||parsed.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(parsed.hostname)))throw Error(`Use an HTTPS ${label} URL or a same-origin path.`);return value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const htmlURL=validatePlatformURL(loginURL,'login'),htmlSignupURL=validatePlatformURL(signupURL,'signup'),htmlEnterpriseURL=validatePlatformURL(enterpriseURL,'enterprise request');
 const assets={};const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.mp4':'video/mp4'};
@@ -23,10 +25,15 @@ for(const file of fs.readdirSync(web)){
 const contactSource=fs.readFileSync('worker/contact.js','utf8').replace('export async function contact','async function contact');
 const router=`
 const platformLoginURL=${JSON.stringify(loginURL)};
+const platformLegalURL=${JSON.stringify(legalURL)};
+const legalSlugs=new Set(['terms','privacy','cookies','billing','refunds','copyright','accessibility']);
 const aliases={'/':'/index.html','/platform':'/platform.html','/solutions':'/solutions.html','/clients':'/clients.html','/about':'/about.html','/about-us':'/about.html','/contact':'/contact.html','/pricing':'/pricing.html','/portal':'/portal.html'};
 export default {async fetch(request,env){
  const url=new URL(request.url);
  if(url.pathname==='/portal')return Response.redirect(new URL(platformLoginURL,request.url).href,302);
+ const legalSlug=url.pathname.replace(/\\/$/,'').replace(/^\\/legal/,'').replace(/^\\//,'');
+ if(url.pathname.replace(/\\/$/,'')==='/legal')return Response.redirect(new URL(platformLegalURL,request.url).href,302);
+ if(legalSlugs.has(legalSlug))return Response.redirect(new URL(platformLegalURL+'/'+legalSlug,request.url).href,302);
  if(url.pathname==='/api/contact')return contact(request,env);
  if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405,headers:{Allow:'GET, HEAD'}});
  let key=aliases[url.pathname.replace(/\\/$/,'')||'/']||url.pathname;
