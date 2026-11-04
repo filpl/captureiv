@@ -1,0 +1,7 @@
+{% extends "legal/_base.html" %}
+{% set title = "Legal & policies" %}
+{% block meta %}{% endblock %}
+{% block body %}
+<p>These pages explain the terms for using Capture IV, how we handle personal information, the cookies we use, and how plans, billing, refunds and content work.</p>
+<ul class="legal-list">{% for key, name in legal.pages.items() %}<li><a href="{{ legal_url(key) }}">{{ name }}</a></li>{% endfor %}</ul>
+{% endblock %}

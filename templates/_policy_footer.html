@@ -1,10 +1,10 @@
 <footer class="platform-policy-links" aria-label="Legal and company information">
-  <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/privacy">Privacy</a>
-  <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/terms">Terms</a>
-  <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/cookies">Cookies</a>
-  <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/billing">Billing &amp; cancellation</a>
-  <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/refunds">Refunds</a>
-  <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/copyright">Copyright &amp; content</a>
-  <a href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com').rstrip('/') }}/accessibility">Accessibility</a>
+  <a href="{{ legal_url('privacy') }}">Privacy</a>
+  <a href="{{ legal_url('terms') }}">Terms</a>
+  <a href="{{ legal_url('cookies') }}">Cookies</a>
+  <a href="{{ legal_url('billing') }}">Billing &amp; cancellation</a>
+  <a href="{{ legal_url('refunds') }}">Refunds</a>
+  <a href="{{ legal_url('copyright') }}">Copyright &amp; content</a>
+  <a href="{{ legal_url('accessibility') }}">Accessibility</a>
   <span>Capture IV · <a href="mailto:support@captureiv.com">support@captureiv.com</a></span>
 </footer>

@@ -161,8 +161,9 @@ if app_env == "production":
 ENTERPRISE_INQUIRY_EMAIL = os.environ.get("ENTERPRISE_INQUIRY_EMAIL", "").strip()
 STRIPE_API_VERSION = "2026-09-30.endive"
 BILLING_TERMS_VERSION = "2026-10-25"
-ACCOUNT_TERMS_VERSION = "2026-10-25"
-PRIVACY_NOTICE_VERSION = "2026-10-25"
+# Bumped when the published /legal pages were first added to the app.
+ACCOUNT_TERMS_VERSION = "2026-11-03"
+PRIVACY_NOTICE_VERSION = "2026-11-03"
 
 
 def stripe_api_key_is_valid(key=None, environment=None):
@@ -228,6 +229,7 @@ SITE_BOUNDARY_SCHEMA_REVISION = "0017_project_site_boundary"
 SITE_BOUNDARY_NAME_SCHEMA_REVISION = "0019_project_site_boundary_name"
 PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
 BASIC_MONTHLY_PRICE_CENTS = 39900
+BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 BASIC_PROJECT_LIMIT = 1
 BASIC_ACCOUNT_LIMIT = 2
 BASIC_STORAGE_LIMIT_BYTES = 1_000_000_000_000  # 1 TB in decimal bytes.
@@ -802,6 +804,51 @@ def csrf_token():
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+
+# Customer-facing legal pages, served by the app so sign-up, checkout and viewer
+# links always resolve (the marketing site is private until launch). Company
+# details come from the environment; the pages show a draft notice until the
+# Platform Owner sets LEGAL_TERMS_APPROVED=1 after legal review.
+LEGAL_PAGES = {
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy",
+    "cookies": "Cookie Policy",
+    "billing": "Plans, Billing & Cancellation",
+    "refunds": "Refund Policy",
+    "copyright": "Copyright & Content Policy",
+    "accessibility": "Accessibility Statement",
+}
+
+
+def legal_url(slug):
+    return url_for("legal_page", slug=slug)
+
+
+app.jinja_env.globals["legal_url"] = legal_url
+
+
+def legal_details():
+    return {
+        "entity": os.environ.get("LEGAL_ENTITY_NAME", "").strip() or "Capture IV",
+        "contact_email": os.environ.get("LEGAL_CONTACT_EMAIL", "").strip() or "support@captureiv.com",
+        "postal_address": os.environ.get("LEGAL_POSTAL_ADDRESS", "").strip(),
+        "governing_law": os.environ.get("LEGAL_GOVERNING_LAW", "").strip(),
+        "arbitration_provider": os.environ.get("LEGAL_ARBITRATION_PROVIDER", "").strip(),
+        "arbitration_location": os.environ.get("LEGAL_ARBITRATION_LOCATION", "").strip(),
+        "approved": os.environ.get("LEGAL_TERMS_APPROVED", "0").strip() == "1",
+        "terms_version": ACCOUNT_TERMS_VERSION,
+        "privacy_version": PRIVACY_NOTICE_VERSION,
+        "billing_version": BILLING_TERMS_VERSION,
+        "pages": LEGAL_PAGES,
+    }
+
+
+def record_policy_acceptance(user_id, resource_type, resource_id):
+    db.session.add(AuditLog(user_id=user_id, action="account_terms_accepted",
+        resource_type=resource_type, resource_id=str(resource_id),
+        detail=json.dumps({"terms_version": ACCOUNT_TERMS_VERSION,
+                           "privacy_notice_version": PRIVACY_NOTICE_VERSION}),
+        ip_address=(request.headers.get("X-Forwarded-For", request.remote_addr) or "")[:80]))
 
 WORKSPACE_PAGES = {"dashboard", "admin", "upload", "site_capture", "fieldview_sandbox"}
 
@@ -3587,9 +3634,12 @@ def enterprise_setup(token):
     if request.method == "POST":
         password = request.form.get("password", "")
         confirm = request.form.get("confirm_password", "")
-        if len(password) < 12 or password != confirm:
+        if request.form.get("accept_policies") != "yes":
+            flash("Please agree to the Terms and acknowledge the Privacy Policy to set up your account.", "error")
+        elif len(password) < 12 or password != confirm:
             flash("Use matching passwords with at least 12 characters.", "error")
         else:
+            record_policy_acceptance(user.id, "enterprise_setup", membership.company_id)
             user.set_password(password)
             user.email_verified = True
             action.used_at = now_utc()
@@ -5093,9 +5143,12 @@ def employee_setup(token):
     if request.method == "POST":
         password = request.form.get("password", "")
         confirm = request.form.get("confirm_password", "")
-        if len(password) < 12 or password != confirm:
+        if request.form.get("accept_policies") != "yes":
+            flash("Please agree to the Terms and acknowledge the Privacy Policy to set up your account.", "error")
+        elif len(password) < 12 or password != confirm:
             flash("Use matching passwords with at least 12 characters.", "error")
         else:
+            record_policy_acceptance(user.id, "employee_setup", membership.company_id)
             user.set_password(password)
             user.email_verified = True
             user.active = True
@@ -5231,6 +5284,18 @@ def delete_document(doc_id):
 
 # --------------------------- JSON API ---------------------------
 # These endpoints let a future React/mobile frontend use the same backend.
+
+@app.get("/legal")
+def legal_index():
+    return render_template("legal/index.html", legal=legal_details())
+
+
+@app.get("/legal/<slug>")
+def legal_page(slug):
+    if slug not in LEGAL_PAGES:
+        abort(404)
+    return render_template(f"legal/{slug}.html", legal=legal_details(), title=LEGAL_PAGES[slug], slug=slug)
+
 
 @app.get("/api/health")
 def api_health():
@@ -5437,7 +5502,7 @@ def configure_basic_billing(monthly_price_id, annual_price_id):
         raise click.ClickException("Initialize the database and Basic plan first.")
     expected_mode = app.config.get("APP_ENV") == "production"
     for price_id, interval, amount in ((monthly_price_id, "month", 39900),
-                                       (annual_price_id, "year", 454860)):
+                                       (annual_price_id, "year", BASIC_ANNUAL_PRICE_CENTS)):
         if not re.fullmatch(r"price_[A-Za-z0-9]+", price_id):
             raise click.ClickException("Invalid Stripe Price ID; no plan settings changed.")
         try:
@@ -5456,7 +5521,7 @@ def configure_basic_billing(monthly_price_id, annual_price_id):
     plan.stripe_monthly_price_id = monthly_price_id
     plan.stripe_annual_price_id = annual_price_id
     plan.monthly_amount_cents = 39900
-    plan.annual_amount_cents = 454860
+    plan.annual_amount_cents = BASIC_ANNUAL_PRICE_CENTS
     db.session.commit()
     print("Approved Basic monthly and annual prices verified and configured.")
 
