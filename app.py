@@ -5,6 +5,7 @@ import secrets
 import hashlib
 import mimetypes
 import math
+import sys
 import time
 from datetime import datetime, date, timedelta
 from io import BytesIO
@@ -228,6 +229,7 @@ DEMO_WORKSPACE_SCHEMA_REVISION = "0016_nonbillable_demo_workspaces"
 SITE_BOUNDARY_SCHEMA_REVISION = "0017_project_site_boundary"
 SITE_BOUNDARY_NAME_SCHEMA_REVISION = "0019_project_site_boundary_name"
 PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
+WALKTHROUGH_SCHEMA_REVISION = "0020_site_walkthrough_service"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 BASIC_PROJECT_LIMIT = 1
@@ -447,6 +449,86 @@ class ProjectFile(db.Model):
         return parse_tags(self.tags)
 
 
+# --- Site walkthrough service -------------------------------------------------
+# Drawings, 3D models and capture routes for the walkthrough viewer. Positions on
+# a drawing are stored as fractions (0..1) of the drawing's width and height so
+# they stay aligned at any zoom level or screen size.
+
+class WalkthroughSheet(db.Model):
+    """A floor plan or construction drawing (PDF page or image)."""
+    id = db.Column(db.Integer, primary_key=True)
+    project = db.Column(db.String(160), nullable=False, index=True)
+    floor = db.Column(db.String(120), nullable=False, default="")
+    name = db.Column(db.String(160), nullable=False)
+    kind = db.Column(db.String(10), nullable=False, default="image")  # "pdf" or "image"
+    page = db.Column(db.Integer, nullable=False, default=1)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    filename = db.Column(db.String(500), unique=True, nullable=False)
+    original_filename = db.Column(db.String(500), nullable=False, default="")
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    uploaded_at = db.Column(db.DateTime, default=now_utc, nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+
+class WalkthroughModel(db.Model):
+    """A GLB 3D model of the site or a floor."""
+    id = db.Column(db.Integer, primary_key=True)
+    project = db.Column(db.String(160), nullable=False, index=True)
+    floor = db.Column(db.String(120), nullable=False, default="")
+    name = db.Column(db.String(160), nullable=False)
+    filename = db.Column(db.String(500), unique=True, nullable=False)
+    original_filename = db.Column(db.String(500), nullable=False, default="")
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    uploaded_at = db.Column(db.DateTime, default=now_utc, nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+
+class WalkthroughSession(db.Model):
+    """One capture walk on one drawing and date; its points form a colored route."""
+    id = db.Column(db.Integer, primary_key=True)
+    project = db.Column(db.String(160), nullable=False, index=True)
+    sheet_id = db.Column(db.Integer, db.ForeignKey("walkthrough_sheet.id"), nullable=False, index=True)
+    name = db.Column(db.String(160), nullable=False)
+    capture_date = db.Column(db.Date, nullable=False, index=True)
+    color = db.Column(db.String(7), nullable=False, default="#3b82f6")
+    created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+
+class WalkthroughPoint(db.Model):
+    """A numbered capture location on a session route (optionally placed in 3D)."""
+    id = db.Column(db.Integer, primary_key=True)
+    project = db.Column(db.String(160), nullable=False, index=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("walkthrough_session.id"), nullable=False, index=True)
+    seq = db.Column(db.Integer, nullable=False, default=1)
+    x = db.Column(db.Float, nullable=False)
+    y = db.Column(db.Float, nullable=False)
+    model_id = db.Column(db.Integer, db.ForeignKey("walkthrough_model.id"), nullable=True)
+    mx = db.Column(db.Float, nullable=True)
+    my = db.Column(db.Float, nullable=True)
+    mz = db.Column(db.Float, nullable=True)
+    label = db.Column(db.String(120), nullable=False, default="")
+    created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+
+class WalkthroughMedia(db.Model):
+    """A 360° image, photo or video captured at a point."""
+    id = db.Column(db.Integer, primary_key=True)
+    project = db.Column(db.String(160), nullable=False, index=True)
+    point_id = db.Column(db.Integer, db.ForeignKey("walkthrough_point.id"), nullable=False, index=True)
+    kind = db.Column(db.String(10), nullable=False, default="photo")  # "pano", "photo" or "video"
+    filename = db.Column(db.String(500), unique=True, nullable=False)
+    original_filename = db.Column(db.String(500), nullable=False, default="")
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    uploaded_at = db.Column(db.DateTime, default=now_utc, nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+
+WALKTHROUGH_MODELS = (WalkthroughSheet, WalkthroughModel, WalkthroughSession, WalkthroughPoint, WalkthroughMedia)
+WALKTHROUGH_FILE_MODELS = (WalkthroughSheet, WalkthroughModel, WalkthroughMedia)
+
+
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
@@ -467,6 +549,9 @@ class Company(db.Model):
     project_limit = db.Column(db.Integer, nullable=True)
     employee_limit = db.Column(db.Integer, nullable=True)
     is_demo = db.Column(db.Boolean, nullable=False, default=False)
+    # Separately granted services: drone flights (existing) and site walkthroughs.
+    service_drone = db.Column(db.Boolean, nullable=False, default=True)
+    service_walkthrough = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
 
 
@@ -646,7 +731,7 @@ class RateLimitEvent(db.Model):
 
 TENANT_MODELS = (ProjectAccess, ProjectSiteMap, ProjectPhotoReference, ProjectPhotoAnnotation,
                  ProjectPinnedPhoto, ProjectSiteSetup, ProjectFlightPath, ProjectMapPin, Flight, ProjectFile, UploadTransfer,
-                 StorageReservation)
+                 StorageReservation) + WALKTHROUGH_MODELS
 
 
 def current_membership():
@@ -735,12 +820,33 @@ def admin_required(fn):
     return wrapped
 
 
+COMPANY_SERVICES = {"drone": "Drone flights", "walkthrough": "Site walkthrough"}
+# Plan features that belong to the drone service and disappear when it is not granted.
+DRONE_SERVICE_FEATURES = {"flight_scans", "site_maps", "photos"}
+
+
+def company_service_enabled(service, company_id=None):
+    """Whether the Platform Owner granted a service ("drone" or "walkthrough") to a company."""
+    if service not in COMPANY_SERVICES:
+        return False
+    if company_id is None:
+        membership = current_membership()
+        company_id = membership.company_id if membership else None
+    company = db.session.get(Company, company_id) if company_id else None
+    if not company:
+        return False
+    value = getattr(company, "service_" + service, None)
+    return (value is not False) if service == "drone" else bool(value)
+
+
 def company_feature_enabled(feature, company_id=None):
     if feature not in PLAN_FEATURES:
         return False
     membership = current_membership()
     target_company_id = company_id or (membership.company_id if membership else None)
     if not target_company_id:
+        return False
+    if feature in DRONE_SERVICE_FEATURES and not company_service_enabled("drone", target_company_id):
         return False
     subscription = (CompanySubscription.query.filter_by(company_id=target_company_id)
                     .order_by(CompanySubscription.id.desc()).first())
@@ -850,7 +956,8 @@ def record_policy_acceptance(user_id, resource_type, resource_id):
                            "privacy_notice_version": PRIVACY_NOTICE_VERSION}),
         ip_address=(request.headers.get("X-Forwarded-For", request.remote_addr) or "")[:80]))
 
-WORKSPACE_PAGES = {"dashboard", "admin", "upload", "site_capture", "fieldview_sandbox"}
+WORKSPACE_PAGES = {"dashboard", "admin", "upload", "site_capture", "fieldview_sandbox",
+                   "walkthrough.index", "walkthrough.view"}
 
 
 @app.context_processor
@@ -866,10 +973,15 @@ def navigation_context():
         section = "billing"
     elif request.path.startswith("/admin"):
         section = "admin"
+    elif request.path.startswith("/walkthrough"):
+        section = "walkthrough"
     else:
         section = "archive"
     membership = current_membership()
+    company_id = membership.company_id if membership else None
     return {"nav_section": section, "nav_company": membership.company if membership else None,
+            "nav_services": {key: company_service_enabled(key, company_id) for key in COMPANY_SERVICES}
+                if company_id else {},
             "owner_workspace_choices": Company.query.filter_by(status="active").order_by(Company.name).all()
                 if current_user.is_authenticated and current_user.platform_owner and current_user.active else []}
 
@@ -1155,7 +1267,7 @@ def sha256_file(path, chunk_size=8 * 1024 * 1024):
     return digest.hexdigest()
 
 
-STORAGE_FILE_MODELS = (Flight, ProjectFile, ProjectSiteMap, ProjectPhotoReference, ProjectPinnedPhoto)
+STORAGE_FILE_MODELS = (Flight, ProjectFile, ProjectSiteMap, ProjectPhotoReference, ProjectPinnedPhoto) + WALKTHROUGH_FILE_MODELS
 
 
 def company_storage_bytes(company_id):
@@ -1328,7 +1440,8 @@ def save_upload(file_storage, *, replacing_size=0):
 
 
 PROJECT_MODELS = (Flight, ProjectFile, ProjectAccess, ProjectSiteMap, ProjectPhotoReference,
-                  ProjectPhotoAnnotation, ProjectPinnedPhoto, ProjectSiteSetup, ProjectFlightPath, ProjectMapPin)
+                  ProjectPhotoAnnotation, ProjectPinnedPhoto, ProjectSiteSetup, ProjectFlightPath, ProjectMapPin,
+                  WalkthroughSheet, WalkthroughModel, WalkthroughSession)
 
 
 def company_project_names(company_id):
@@ -1509,7 +1622,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=BILLING_PERIOD_START_SCHEMA_REVISION),
                             SchemaMigration(revision=DEMO_WORKSPACE_SCHEMA_REVISION),
                             SchemaMigration(revision=SITE_BOUNDARY_SCHEMA_REVISION),
-                            SchemaMigration(revision=PROJECT_CODE_EMAIL_SCHEMA_REVISION)])
+                            SchemaMigration(revision=PROJECT_CODE_EMAIL_SCHEMA_REVISION),
+                            SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1530,6 +1644,7 @@ def migrate_sqlite():
         apply_site_boundary_migration()
         apply_site_boundary_name_migration()
         apply_project_code_email_migration()
+        apply_walkthrough_migration()
         return
 
     timestamp_type = migration_timestamp_type()
@@ -1635,6 +1750,7 @@ def migrate_sqlite():
     apply_site_boundary_migration()
     apply_site_boundary_name_migration()
     apply_project_code_email_migration()
+    apply_walkthrough_migration()
 
 
 def apply_enterprise_schema_migration():
@@ -1897,6 +2013,24 @@ def apply_project_code_email_migration():
     db.session.commit()
 
 
+def apply_walkthrough_migration():
+    """Add the per-company service switches and the walkthrough tables (additive only)."""
+    if db.session.get(SchemaMigration, WALKTHROUGH_SCHEMA_REVISION):
+        return
+    columns = {column["name"] for column in inspect(db.engine).get_columns("company")}
+    if "service_drone" not in columns:
+        db.session.execute(text('ALTER TABLE "company" ADD COLUMN "service_drone" '
+                                + migration_boolean_column(default=True)))
+    if "service_walkthrough" not in columns:
+        db.session.execute(text('ALTER TABLE "company" ADD COLUMN "service_walkthrough" '
+                                + migration_boolean_column(default=False)))
+    db.session.commit()
+    # create_all only creates tables that do not exist yet; existing data is untouched.
+    db.metadata.create_all(db.engine, tables=[model.__table__ for model in WALKTHROUGH_MODELS])
+    db.session.add(SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_basic_plan_defaults():
     """Apply the approved Basic entitlements once, without touching Enterprise."""
     if db.session.get(SchemaMigration, BASIC_PLAN_SCHEMA_REVISION):
@@ -1954,7 +2088,9 @@ def shared_project(token):
     access = ProjectAccess.query.filter_by(share_token=token).first()
     if not viewer_access_active(access):
         abort(404)
-    if not company_feature_enabled("flight_scans", access.company_id):
+    drone_viewer = company_feature_enabled("flight_scans", access.company_id)
+    walkthrough_viewer = bool(access.allow_media and company_service_enabled("walkthrough", access.company_id))
+    if not drone_viewer and not walkthrough_viewer:
         abort(404)
     if request.method == "POST":
         submitted = re.sub(r"[^A-Z]", "", request.form.get("code", "").upper())[:4]
@@ -1969,6 +2105,8 @@ def shared_project(token):
     if session.get("viewer_code") != access.code or session.get("viewer_token") != access.share_token:
         return render_template("access.html", share_token=token,
                                next_tab=request.args.get("tab", "map"), project_name=access.project)
+    if walkthrough_viewer and (not drone_viewer or request.args.get("tab") == "walkthrough"):
+        return redirect(url_for("walkthrough.shared", token=token))
     return render_project_view(access)
 
 
@@ -2095,7 +2233,9 @@ def render_project_view(access):
                            flight_paths_by_date=flight_paths_by_date,
                            compare_date=compare_date,
                            google_maps_api_key=app.config.get("GOOGLE_MAPS_API_KEY", ""),
-                           map_default_center=request_geo_center())
+                           map_default_center=request_geo_center(),
+                           walkthrough_url=url_for("walkthrough.shared", token=token)
+                               if access.allow_media and company_service_enabled("walkthrough", access.company_id) else "")
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -3486,6 +3626,26 @@ def update_company_limits(company_id):
           f"Project limit={project_limit or 'plan default'}, employee limit={employee_limit or 'plan default'}, "
           f"storage override={storage_gb if storage_gb is not None else 'plan default'} GB")
     flash(f"Limits updated for {company.name}.", "success")
+    return redirect(url_for("platform_owner_dashboard"))
+
+
+@app.post("/owner/companies/<int:company_id>/services")
+@platform_owner_required
+def update_company_services(company_id):
+    """Grant a company the drone service, the site walkthrough service, or both."""
+    company = db.get_or_404(Company, company_id)
+    drone = request.form.get("service_drone") == "1"
+    walkthrough_service = request.form.get("service_walkthrough") == "1"
+    if not drone and not walkthrough_service:
+        flash("Give each company at least one service. No changes were saved.", "error")
+        return redirect(url_for("platform_owner_dashboard"))
+    company.service_drone = drone
+    company.service_walkthrough = walkthrough_service
+    db.session.commit()
+    granted = ", ".join(label for key, label in COMPANY_SERVICES.items()
+                        if (drone if key == "drone" else walkthrough_service))
+    audit("company_services_updated", "company", company.id, f"Services: {granted}")
+    flash(f"Services for {company.name}: {granted}. No files were removed.", "success")
     return redirect(url_for("platform_owner_dashboard"))
 
 
@@ -5521,6 +5681,11 @@ def configure_basic_billing(monthly_price_id, annual_price_id):
     plan.annual_amount_cents = BASIC_ANNUAL_PRICE_CENTS
     db.session.commit()
     print("Approved Basic monthly and annual prices verified and configured.")
+
+
+# The site walkthrough viewer lives in its own module and is granted per company.
+from walkthrough import create_walkthrough_blueprint  # noqa: E402
+app.register_blueprint(create_walkthrough_blueprint(sys.modules[__name__]))
 
 
 if __name__ == "__main__":

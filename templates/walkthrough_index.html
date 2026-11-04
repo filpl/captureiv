@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}Site walkthrough{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">SITE WALKTHROUGH</p><h1>Walkthrough projects</h1><p class="muted">Floor plans, capture routes, 360° imagery and 3D models for each project.</p></div></div>
+{% if limit_message %}<div class="flash error">{{ limit_message }}</div>{% endif %}
+<section class="panel admin-panel">
+  {% if projects %}
+  <div class="document-list">
+    {% for project in projects %}
+    <div class="document-row"><div class="file-icon">360</div><div class="file-info"><strong>{{ project }}</strong><span>{{ sheet_counts.get(project, 0) }} drawing{{ '' if sheet_counts.get(project, 0) == 1 else 's' }} · {{ session_counts.get(project, 0) }} capture session{{ '' if session_counts.get(project, 0) == 1 else 's' }}</span></div><a class="button secondary small" href="{{ url_for('walkthrough.view', project=project) }}">Open viewer →</a></div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="muted">No projects yet.</p>{% endif %}
+  {% if can_start %}
+  <form method="get" action="{{ url_for('walkthrough.view') }}" class="inline-create" style="margin-top:18px">
+    <input name="project" list="walkthrough-projects" placeholder="Project name" maxlength="160" required aria-label="Project name">
+    <datalist id="walkthrough-projects">{% for project in projects %}<option value="{{ project }}">{% endfor %}</datalist>
+    <button class="button primary small">Open or start a project</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

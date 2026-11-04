@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ project }} · Site walkthrough · Capture IV</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='walkthrough/viewer.css') }}?v=1">
+  <script type="importmap">{"imports":{"three":"{{ url_for('static', filename='vendor/three/three.module.min.js') }}","three/addons/":"{{ url_for('static', filename='vendor/three/addons/') }}","pdfjs":"{{ url_for('static', filename='vendor/pdfjs/pdf.min.mjs') }}"}}</script>
+</head>
+<body class="wt">
+<header class="wt-top">
+  <a class="wt-brand" href="{{ wt.homeUrl or '#' }}" aria-label="Capture IV site walkthrough"><span class="wt-logo"><svg class="wt-logo-mark" viewBox="0 0 104 100" aria-hidden="true" focusable="false"><path d="M25 0H104L77 27H30V73H77L104 100H25L0 76V24Z"/></svg><span class="wt-logo-word" aria-hidden="true">apture&nbsp;<b>IV</b></span></span><small class="wt-logo-tag">Site walkthrough</small></a>
+  <div class="wt-project"><span class="wt-label">Project</span><strong>{{ project }}</strong></div>
+  <div class="wt-modes" role="tablist" aria-label="Viewer mode">
+    <button class="wt-mode is-active" data-mode="2d" role="tab" aria-selected="true">2D plan</button>
+    <button class="wt-mode" data-mode="3d" role="tab" aria-selected="false">3D model</button>
+  </div>
+  <div class="wt-dates"><label class="wt-label" for="wt-date">Capture date</label><select id="wt-date"></select></div>
+  <div class="wt-top-actions">
+    {% if wt.droneUrl %}<a class="wt-btn ghost" href="{{ wt.droneUrl }}">Drone flights</a>{% endif %}
+    {% if not share %}<button class="wt-btn ghost" id="wt-share" type="button">Share</button>{% endif %}
+    {% if wt.canEdit %}<button class="wt-btn" id="wt-edit-toggle" type="button" aria-pressed="false">Edit</button>{% endif %}
+    <button class="wt-icon" id="wt-fullscreen" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+    <button class="wt-icon" id="wt-settings" type="button" title="Display settings" aria-label="Display settings">⚙</button>
+  </div>
+</header>
+<div class="wt-body">
+  <aside class="wt-side" id="wt-side">
+    <button class="wt-collapse" id="wt-collapse" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">‹</button>
+    <section class="wt-sec"><h2>Floors &amp; drawings</h2><div id="wt-sheets" class="wt-list"></div></section>
+    <section class="wt-sec"><h2>Layers</h2>
+      <label class="wt-check"><input type="checkbox" id="wt-show-paths" checked> Capture paths</label>
+      <label class="wt-check"><input type="checkbox" id="wt-show-markers" checked> Location markers</label>
+      <div id="wt-model-layers"></div>
+    </section>
+    <section class="wt-sec"><h2>Capture sessions</h2><div id="wt-sessions" class="wt-list"></div></section>
+    <section class="wt-sec wt-edit-only" hidden id="wt-admin">
+      <h2>Set up</h2>
+      <details><summary>Upload drawing</summary>
+        <form id="wt-sheet-form" class="wt-form"><input name="floor" placeholder="Floor (e.g. Level 3)" maxlength="120"><input name="name" placeholder="Drawing name (e.g. A-103)" maxlength="160"><input name="page" type="number" min="1" value="1" title="PDF page number"><input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" required><button class="wt-btn">Upload drawing</button></form></details>
+      <details><summary>Upload 3D model (GLB)</summary>
+        <form id="wt-model-form" class="wt-form"><input name="floor" placeholder="Floor (optional)" maxlength="120"><input name="name" placeholder="Model name" maxlength="160"><input name="file" type="file" accept=".glb" required><button class="wt-btn">Upload model</button></form></details>
+      <details><summary>New capture session</summary>
+        <form id="wt-session-form" class="wt-form"><input name="name" placeholder="Session name" maxlength="160"><input name="date" type="date" required><input name="color" type="color" value="#3b82f6" title="Route color"><button class="wt-btn">Create on current drawing</button></form></details>
+    </section>
+  </aside>
+  <main class="wt-stage-wrap" id="wt-stage-wrap">
+    <div class="wt-empty" id="wt-empty" hidden></div>
+    <div class="wt-plan" id="wt-plan" tabindex="0" aria-label="Drawing viewer">
+      <div class="wt-plan-inner" id="wt-plan-inner"><canvas id="wt-plan-canvas"></canvas><svg id="wt-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div>
+    </div>
+    <div class="wt-3d" id="wt-3d" hidden><canvas id="wt-3d-canvas"></canvas><div class="wt-3d-hint" id="wt-3d-hint"></div></div>
+    <div class="wt-toolbar" id="wt-toolbar">
+      <button class="wt-icon" data-act="zoom-in" title="Zoom in" aria-label="Zoom in">＋</button>
+      <button class="wt-icon" data-act="zoom-out" title="Zoom out" aria-label="Zoom out">－</button>
+      <button class="wt-icon" data-act="rotate" title="Rotate 90°" aria-label="Rotate 90 degrees">⟳</button>
+      <button class="wt-icon" data-act="reset" title="Reset view" aria-label="Reset view">⌂</button>
+    </div>
+    <div class="wt-edit-bar wt-edit-only" id="wt-edit-bar" hidden>
+      <span id="wt-edit-status">Edit mode</span>
+      <button class="wt-btn" id="wt-add-points" type="button" aria-pressed="false">Add points</button>
+      <button class="wt-btn ghost" id="wt-place-3d" type="button" aria-pressed="false" hidden>Place selected point in 3D</button>
+    </div>
+    <div class="wt-timeline" id="wt-timeline" aria-label="Capture timeline"></div>
+    <section class="wt-imm" id="wt-imm" hidden aria-label="Immersive 360° view">
+      <div class="wt-imm-body" id="wt-imm-body"></div>
+      <div class="wt-imm-top">
+        <button class="wt-icon light" id="wt-imm-link" title="Copy link to this location" aria-label="Copy link to this location">🔗</button>
+        <button class="wt-icon light" id="wt-imm-pop" title="Pop out into a floating window" aria-label="Pop out into a floating window">⧉</button>
+        {% if wt.canEdit %}<button class="wt-icon light wt-edit-only" hidden id="wt-imm-edit" title="Edit this point" aria-label="Edit this point">✎</button>{% endif %}
+      </div>
+      <div class="wt-mini" id="wt-mini">
+        <div class="wt-mini-head"><strong id="wt-mini-floor"></strong><button class="wt-mini-btn" id="wt-imm-exit" title="Back to the floor plan" aria-label="Back to the floor plan">⤢</button></div>
+        <div class="wt-mini-map" id="wt-mini-map"><canvas id="wt-mini-canvas"></canvas><svg id="wt-mini-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg></div>
+      </div>
+      <div class="wt-imm-tools">
+        <button class="wt-icon light" id="wt-imm-compare" title="Compare with another date" aria-label="Compare with another date">◫</button>
+        <button class="wt-icon light" id="wt-imm-zin" title="Zoom in" aria-label="Zoom in">＋</button>
+        <button class="wt-icon light" id="wt-imm-zout" title="Zoom out" aria-label="Zoom out">－</button>
+      </div>
+      <div class="wt-imm-bar">
+        <div class="wt-pill"><button id="wt-imm-dprev" title="Earlier capture date here" aria-label="Earlier capture date here">←</button><span id="wt-imm-date"></span><button id="wt-imm-dnext" title="Later capture date here" aria-label="Later capture date here">→</button></div>
+        <div class="wt-pill"><button id="wt-imm-first" title="First location" aria-label="First location">⏮</button><button id="wt-imm-prev" title="Previous location" aria-label="Previous location">‹</button><button id="wt-imm-play" title="Play walk" aria-label="Play walk">▶</button><button id="wt-imm-next" title="Next location" aria-label="Next location">›</button><button id="wt-imm-last" title="Last location" aria-label="Last location">⏭</button><span id="wt-imm-count"></span></div>
+        <div class="wt-pill wt-pill-blue"><span id="wt-imm-session"></span></div>
+      </div>
+    </section>
+  </main>
+  <aside class="wt-panel" id="wt-panel" hidden>
+    <button class="wt-icon wt-panel-close" id="wt-panel-close" aria-label="Close panel">✕</button>
+    <div id="wt-panel-body"></div>
+  </aside>
+</div>
+<div class="wt-window" id="wt-window" hidden role="dialog" aria-label="Capture media">
+  <div class="wt-window-head" id="wt-window-head">
+    <button class="wt-icon" id="wt-prev" title="Previous location" aria-label="Previous location">‹</button>
+    <div class="wt-window-title"><strong id="wt-window-title"></strong><small id="wt-window-sub"></small></div>
+    <button class="wt-icon" id="wt-next" title="Next location" aria-label="Next location">›</button>
+    <select id="wt-media-pick" aria-label="Media at this location"></select>
+    <button class="wt-icon" id="wt-compare" title="Compare with another date" aria-label="Compare with another date">⇆</button>
+    <button class="wt-icon" id="wt-to-imm" title="Full immersive view" aria-label="Full immersive view">⛶</button>
+    <button class="wt-icon" id="wt-max" title="Maximize" aria-label="Maximize">▢</button>
+    <button class="wt-icon" id="wt-close" title="Close" aria-label="Close">✕</button>
+  </div>
+  <div class="wt-window-body" id="wt-window-body"></div>
+  <div class="wt-window-foot wt-edit-only" id="wt-window-foot" hidden>
+    <form id="wt-media-form" class="wt-form wt-inline"><select name="kind" aria-label="Media type"><option value="pano">360° image</option><option value="photo">Photo</option><option value="auto">Video (auto)</option></select><input name="files" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.mp4,.m4v,.mov,.webm" required><button class="wt-btn">Add to this location</button></form>
+    <div class="wt-point-actions"><button class="wt-btn ghost" data-pt="up" type="button">Move earlier</button><button class="wt-btn ghost" data-pt="down" type="button">Move later</button><button class="wt-btn ghost" data-pt="drag" type="button">Reposition</button><button class="wt-btn danger" data-pt="delete" type="button">Delete point</button></div>
+  </div>
+  <div class="wt-resize" id="wt-resize" aria-hidden="true"></div>
+</div>
+<div class="wt-toast" id="wt-toast" role="status" aria-live="polite"></div>
+<script id="wt-config" type="application/json">{{ wt|tojson }}</script>
+<script>window.WT_CSRF = {{ csrf_token()|tojson }};</script>
+<script type="module" src="{{ url_for('static', filename='walkthrough/viewer.js') }}?v=1"></script>
+</body>
+</html>

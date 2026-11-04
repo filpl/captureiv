@@ -4,7 +4,8 @@
     {% set links = [('archive', 'dashboard', 'Archive')] %}
     {% if g.retrieval_only %}{% set links = [('archive', 'retrieve_workspace', 'Retrieve files')] %}
     {% else %}
-      {% if current_user.is_admin %}{% set links = links + [('admin', 'admin', 'Admin'), ('upload', 'upload', 'Upload')] %}
+      {% if nav_services.walkthrough %}{% set links = links + [('walkthrough', 'walkthrough.index', 'Walkthrough')] %}{% endif %}
+      {% if current_user.is_admin %}{% set links = links + [('admin', 'admin', 'Admin')] %}{% if nav_services.drone is not defined or nav_services.drone %}{% set links = links + [('upload', 'upload', 'Upload')] %}{% endif %}
         {% if not current_user.platform_owner %}{% set links = links + [('billing', 'billing_portal', 'Billing')] %}{% endif %}
       {% endif %}
       {% if current_user.platform_owner %}{% set links = links + [('sandbox', 'fieldview_sandbox', 'Sandbox')] %}{% endif %}
