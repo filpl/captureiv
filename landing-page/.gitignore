@@ -5,3 +5,6 @@ dist/
 .env.*
 .dev.vars
 .local/
+
+# Real Worker config with live resource ids (template is wrangler.example.jsonc)
+wrangler.jsonc

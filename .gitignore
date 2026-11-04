@@ -11,3 +11,6 @@ static/uploads/*
 !.env.production.example
 
 .DS_Store
+
+# Local Claude Code session artifacts (screenshots, ad renders, launch config)
+.claude/
