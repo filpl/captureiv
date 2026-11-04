@@ -54,7 +54,9 @@ const sheets = () => state.data?.sheets || [];
 const currentSheet = () => sheets().find((s) => s.id === state.sheetId) || null;
 const allSessions = () => state.data?.sessions || [];
 const sheetSessions = () => allSessions().filter((s) => s.sheet_id === state.sheetId);
-const visibleSessions = () => sheetSessions().filter((s) => !state.hiddenSessions.has(s.id) && (!state.date || s.date === state.date));
+// While capturing in the field, only the walk being recorded is drawn, so its numbers are unambiguous.
+const visibleSessions = () => sheetSessions().filter((s) => (state.capture ? s.id === state.capture.sessionId
+  : !state.hiddenSessions.has(s.id) && (!state.date || s.date === state.date)));
 function findPoint(pointId) {
   for (const session of allSessions()) {
     const point = session.points.find((p) => p.id === pointId);
@@ -259,7 +261,7 @@ function drawOverlay() {
     const pts = s.points;
     if (state.showPaths && pts.length > 1) {
       overlay.append(svg('polyline', { class: 'wt-path', points: pts.map((p) => `${p.x * W},${p.y * H}`).join(' '),
-        stroke: s.color, 'stroke-width': state.pathWidth + (s.id === state.editSessionId && state.edit ? 1 : 0) }));
+        stroke: s.color, 'data-w': state.pathWidth + (s.id === state.editSessionId && state.edit ? 1 : 0) }));
     }
     if (!state.showMarkers) continue;
     for (const p of pts) {
@@ -279,10 +281,11 @@ function drawOverlay() {
 }
 function sizeMarkers() {
   const k = 1 / state.view.s;
+  for (const line of overlay.querySelectorAll('.wt-path')) line.setAttribute('stroke-width', Number(line.dataset.w) * k);
   const r = state.markerSize * k;
   for (const g of overlay.querySelectorAll('.wt-marker')) {
     const dot = g.querySelector('.wt-dot'), halo = g.querySelector('.wt-halo'), text = g.querySelector('text');
-    dot.setAttribute('r', r); if (halo) halo.setAttribute('r', r * 2.1);
+    dot.setAttribute('r', r); dot.setAttribute('stroke-width', 2 * k); if (halo) halo.setAttribute('r', r * 2.1);
     text.setAttribute('font-size', r * 1.05);
     // Keep numbers upright when the drawing is rotated.
     text.setAttribute('transform', `rotate(${-state.view.r} ${g.dataset.cx} ${g.dataset.cy})`);
