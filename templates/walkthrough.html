@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ project }} · Site walkthrough · Capture IV</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='walkthrough/viewer.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='walkthrough/viewer.css') }}?v=3">
   <script type="importmap">{"imports":{"three":"{{ url_for('static', filename='vendor/three/three.module.min.js') }}","three/addons/":"{{ url_for('static', filename='vendor/three/addons/') }}","pdfjs":"{{ url_for('static', filename='vendor/pdfjs/pdf.min.mjs') }}"}}</script>
 </head>
 <body class="wt">
@@ -18,6 +18,7 @@
   <div class="wt-top-actions">
     {% if wt.droneUrl %}<a class="wt-btn ghost" href="{{ wt.droneUrl }}">Drone flights</a>{% endif %}
     {% if not share %}<button class="wt-btn ghost" id="wt-share" type="button">Share</button>{% endif %}
+    {% if wt.canEdit %}<button class="wt-btn capture" id="wt-capture-btn" type="button">● Field capture</button>{% endif %}
     {% if wt.canEdit %}<button class="wt-btn" id="wt-edit-toggle" type="button" aria-pressed="false">Edit</button>{% endif %}
     <button class="wt-icon" id="wt-fullscreen" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button>
     <button class="wt-icon" id="wt-settings" type="button" title="Display settings" aria-label="Display settings">⚙</button>
@@ -39,6 +40,14 @@
         <form id="wt-sheet-form" class="wt-form"><input name="floor" placeholder="Floor (e.g. Level 3)" maxlength="120"><input name="name" placeholder="Drawing name (e.g. A-103)" maxlength="160"><input name="page" type="number" min="1" value="1" title="PDF page number"><input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" required><button class="wt-btn">Upload drawing</button></form></details>
       <details><summary>Upload 3D model (GLB)</summary>
         <form id="wt-model-form" class="wt-form"><input name="floor" placeholder="Floor (optional)" maxlength="120"><input name="name" placeholder="Model name" maxlength="160"><input name="file" type="file" accept=".glb" required><button class="wt-btn">Upload model</button></form></details>
+      <details id="wt-tools-walk"><summary>Selected walk tools</summary>
+        <div class="wt-form" id="wt-tools-photo"><span class="wt-floor">Match 360° files from your camera to this walk's points by the time they were taken.</span><button class="wt-btn" type="button" id="wt-match-open">Match 360° files…</button></div>
+        <div class="wt-form" id="wt-tools-video" hidden>
+          <label class="wt-floor" for="wt-video-file">Walk video (360° MP4/WebM)</label><input id="wt-video-file" type="file" accept=".mp4,.m4v,.mov,.webm"><button class="wt-btn" type="button" id="wt-video-upload">Upload walk video</button>
+          <span class="wt-floor">Positions out of step with the video? Shift them all:</span>
+          <div class="wt-inline wt-form"><input id="wt-shift-seconds" type="number" step="0.5" value="0" style="width:90px" aria-label="Seconds to shift"><button class="wt-btn ghost" type="button" id="wt-shift-apply">Shift seconds</button></div>
+        </div>
+      </details>
       <details><summary>New capture session</summary>
         <form id="wt-session-form" class="wt-form"><input name="name" placeholder="Session name" maxlength="160"><input name="date" type="date" required><input name="color" type="color" value="#3b82f6" title="Route color"><button class="wt-btn">Create on current drawing</button></form></details>
     </section>
@@ -80,6 +89,7 @@
       <div class="wt-imm-bar">
         <div class="wt-pill"><button id="wt-imm-dprev" title="Earlier capture date here" aria-label="Earlier capture date here">←</button><span id="wt-imm-date"></span><button id="wt-imm-dnext" title="Later capture date here" aria-label="Later capture date here">→</button></div>
         <div class="wt-pill"><button id="wt-imm-first" title="First location" aria-label="First location">⏮</button><button id="wt-imm-prev" title="Previous location" aria-label="Previous location">‹</button><button id="wt-imm-play" title="Play walk" aria-label="Play walk">▶</button><button id="wt-imm-next" title="Next location" aria-label="Next location">›</button><button id="wt-imm-last" title="Last location" aria-label="Last location">⏭</button><span id="wt-imm-count"></span></div>
+        <div class="wt-pill wt-scrub" id="wt-imm-scrubwrap" hidden><input type="range" id="wt-imm-scrub" min="0" max="100" step="0.1" value="0" aria-label="Walk position"><span id="wt-imm-time">0:00</span></div>
         <div class="wt-pill wt-pill-blue"><span id="wt-imm-session"></span></div>
       </div>
     </section>
@@ -107,9 +117,44 @@
   </div>
   <div class="wt-resize" id="wt-resize" aria-hidden="true"></div>
 </div>
+{% if wt.canEdit %}
+<section class="wt-cap" id="wt-cap" hidden aria-label="Field capture">
+  <div class="wt-cap-start" id="wt-cap-start">
+    <h2>Field capture</h2>
+    <label class="wt-floor" for="wt-cap-sheet">Floor plan</label><select id="wt-cap-sheet"></select>
+    <div class="wt-cap-kinds" role="radiogroup" aria-label="Walk type">
+      <label class="wt-cap-kind"><input type="radio" name="wt-cap-kind" value="photo" checked><span><strong>Photo walk</strong><small>Tap your spot, take a photo or 360° shot there.</small></span></label>
+      <label class="wt-cap-kind"><input type="radio" name="wt-cap-kind" value="video"><span><strong>Video walk</strong><small>Record 360° video on your camera; tap the plan as you go.</small></span></label>
+    </div>
+    <div class="wt-cap-row"><button class="wt-btn big" type="button" id="wt-cap-go">Start capture</button><button class="wt-btn ghost big" type="button" id="wt-cap-cancel">Cancel</button></div>
+  </div>
+  <div class="wt-cap-bar" id="wt-cap-bar" hidden>
+    <div class="wt-cap-status"><strong id="wt-cap-title"></strong><span id="wt-cap-hint"></span><span class="wt-cap-queue" id="wt-cap-queue"></span></div>
+    <div class="wt-cap-row">
+      <button class="wt-btn big" type="button" id="wt-cap-timer" hidden>▶ Start walk timer</button>
+      <button class="wt-btn big" type="button" id="wt-cap-photo" hidden>📷 Photo here</button>
+      <label class="wt-cap-toggle" id="wt-cap-pano-wrap" hidden><input type="checkbox" id="wt-cap-pano"> It's a 360° shot</label>
+      <button class="wt-btn ghost big" type="button" id="wt-cap-undo">Undo last point</button>
+      <button class="wt-btn ghost big" type="button" id="wt-cap-finish">Finish</button>
+    </div>
+    <input type="file" id="wt-cap-camera" accept="image/*" capture="environment" hidden>
+  </div>
+  <div class="wt-cap-done" id="wt-cap-done" hidden></div>
+</section>
+<div class="wt-modal" id="wt-match" hidden role="dialog" aria-label="Match 360° files">
+  <div class="wt-modal-card">
+    <h2>Match 360° files to this walk</h2>
+    <p class="wt-floor">Choose the 360° photos from your camera. Each one is matched to the point you marked at the closest time (camera and phone clocks should agree within a few minutes), or simply in order.</p>
+    <input type="file" id="wt-match-files" accept=".jpg,.jpeg,.png,.webp" multiple>
+    <div class="wt-cap-row"><label class="wt-check"><input type="radio" name="wt-match-mode" value="time" checked> By time</label><label class="wt-check"><input type="radio" name="wt-match-mode" value="order"> In order</label></div>
+    <div class="wt-match-list" id="wt-match-list"></div>
+    <div class="wt-cap-row"><button class="wt-btn" type="button" id="wt-match-upload" disabled>Upload matched files</button><button class="wt-btn ghost" type="button" id="wt-match-close">Close</button></div>
+  </div>
+</div>
+{% endif %}
 <div class="wt-toast" id="wt-toast" role="status" aria-live="polite"></div>
 <script id="wt-config" type="application/json">{{ wt|tojson }}</script>
 <script>window.WT_CSRF = {{ csrf_token()|tojson }};</script>
-<script type="module" src="{{ url_for('static', filename='walkthrough/viewer.js') }}?v=1"></script>
+<script type="module" src="{{ url_for('static', filename='walkthrough/viewer.js') }}?v=3"></script>
 </body>
 </html>

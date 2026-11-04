@@ -230,6 +230,7 @@ SITE_BOUNDARY_SCHEMA_REVISION = "0017_project_site_boundary"
 SITE_BOUNDARY_NAME_SCHEMA_REVISION = "0019_project_site_boundary_name"
 PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
 WALKTHROUGH_SCHEMA_REVISION = "0020_site_walkthrough_service"
+WALKTHROUGH_CAPTURE_SCHEMA_REVISION = "0021_walkthrough_field_capture"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 BASIC_PROJECT_LIMIT = 1
@@ -491,6 +492,9 @@ class WalkthroughSession(db.Model):
     name = db.Column(db.String(160), nullable=False)
     capture_date = db.Column(db.Date, nullable=False, index=True)
     color = db.Column(db.String(7), nullable=False, default="#3b82f6")
+    # "photo": a photo/360 shot per point. "video": one 360 video; points mark where the
+    # walker was at a given number of seconds into that video.
+    kind = db.Column(db.String(10), nullable=False, default="photo")
     created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
 
@@ -508,6 +512,8 @@ class WalkthroughPoint(db.Model):
     my = db.Column(db.Float, nullable=True)
     mz = db.Column(db.Float, nullable=True)
     label = db.Column(db.String(120), nullable=False, default="")
+    t = db.Column(db.Float, nullable=True)  # seconds into the session video (video walks)
+    captured_at = db.Column(db.DateTime, nullable=True)  # when the walker marked this spot
     created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
 
@@ -517,7 +523,8 @@ class WalkthroughMedia(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     project = db.Column(db.String(160), nullable=False, index=True)
     point_id = db.Column(db.Integer, db.ForeignKey("walkthrough_point.id"), nullable=False, index=True)
-    kind = db.Column(db.String(10), nullable=False, default="photo")  # "pano", "photo" or "video"
+    kind = db.Column(db.String(10), nullable=False, default="photo")  # "pano", "photo", "video" or "walkvideo"
+    captured_at = db.Column(db.DateTime, nullable=True)  # time the camera took it, when known
     filename = db.Column(db.String(500), unique=True, nullable=False)
     original_filename = db.Column(db.String(500), nullable=False, default="")
     file_size = db.Column(db.BigInteger, nullable=False, default=0)
@@ -1633,7 +1640,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=DEMO_WORKSPACE_SCHEMA_REVISION),
                             SchemaMigration(revision=SITE_BOUNDARY_SCHEMA_REVISION),
                             SchemaMigration(revision=PROJECT_CODE_EMAIL_SCHEMA_REVISION),
-                            SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION)])
+                            SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION),
+                            SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1655,6 +1663,7 @@ def migrate_sqlite():
         apply_site_boundary_name_migration()
         apply_project_code_email_migration()
         apply_walkthrough_migration()
+        apply_walkthrough_capture_migration()
         return
 
     timestamp_type = migration_timestamp_type()
@@ -1761,6 +1770,7 @@ def migrate_sqlite():
     apply_site_boundary_name_migration()
     apply_project_code_email_migration()
     apply_walkthrough_migration()
+    apply_walkthrough_capture_migration()
 
 
 def apply_enterprise_schema_migration():
@@ -2038,6 +2048,27 @@ def apply_walkthrough_migration():
     # create_all only creates tables that do not exist yet; existing data is untouched.
     db.metadata.create_all(db.engine, tables=[model.__table__ for model in WALKTHROUGH_MODELS])
     db.session.add(SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION))
+    db.session.commit()
+
+
+def apply_walkthrough_capture_migration():
+    """Add field-capture columns to the walkthrough tables (additive only)."""
+    if db.session.get(SchemaMigration, WALKTHROUGH_CAPTURE_SCHEMA_REVISION):
+        return
+    tables = set(inspect(db.engine).get_table_names())
+    additions = {
+        "walkthrough_session": {"kind": "VARCHAR(10) NOT NULL DEFAULT 'photo'"},
+        "walkthrough_point": {"t": "FLOAT", "captured_at": migration_timestamp_type()},
+        "walkthrough_media": {"captured_at": migration_timestamp_type()},
+    }
+    for table, columns in additions.items():
+        if table not in tables:
+            continue
+        existing = {column["name"] for column in inspect(db.engine).get_columns(table)}
+        for name, sql_type in columns.items():
+            if name not in existing:
+                db.session.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {sql_type}'))
+    db.session.add(SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION))
     db.session.commit()
 
 

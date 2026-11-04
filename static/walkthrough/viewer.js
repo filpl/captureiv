@@ -46,7 +46,7 @@ async function api(path, body, isForm = false) {
     body: isForm ? body : JSON.stringify(body || {}) });
   let payload = {};
   try { payload = await response.json(); } catch { /* non-JSON error page */ }
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  if (!response.ok) { const err = new Error(payload.error || `Request failed (${response.status})`); err.status = response.status; throw err; }
   return payload;
 }
 
@@ -116,7 +116,7 @@ function renderSidebar() {
       title: 'Select this session', onclick: () => { state.editSessionId = s.id; if (state.date && state.date !== s.date) { state.date = s.date; renderDates(); }
         renderSidebar(); drawOverlay(); updateEditStatus(); } },
       checkbox, el('span', { class: 'wt-swatch', style: `background:${s.color}` }),
-      el('span', { text: s.name }), el('small', { text: `${fmtDate(s.date)} · ${s.points.length} pts` }));
+      el('span', { text: s.name }), el('small', { text: `${s.kind === 'video' ? 'Video · ' : ''}${fmtDate(s.date)} · ${s.points.length} pts` }));
     if (state.edit && cfg.canDelete) item.append(el('span', { class: 'wt-del', role: 'button', title: 'Delete session', text: '✕',
       onclick: (e) => { e.stopPropagation(); remove(`/sessions/${s.id}/delete`, `Delete session "${s.name}", its ${s.points.length} points and their media?`); } }));
     sessionBox.append(item);
@@ -230,7 +230,8 @@ function fitView() {
   const rotated = state.view.r % 180 !== 0;
   const bw = rotated ? state.planH : state.planW, bh = rotated ? state.planW : state.planH;
   if (!bw || !bh || !rect.width) return;
-  const pad = 120;
+  // Leave room for the timeline, or for the capture bar while capturing in the field.
+  const pad = document.body.classList.contains('is-capturing') ? Math.max(120, ($('wt-cap')?.offsetHeight || 0) + 40) : 120;
   const s = Math.min((rect.width - 40) / bw, (rect.height - pad) / bh);
   state.view.s = s; state.view.x = (rect.width - state.planW * s) / 2; state.view.y = (rect.height - pad + 40 - state.planH * s) / 2;
   applyView();
@@ -262,7 +263,7 @@ function drawOverlay() {
     }
     if (!state.showMarkers) continue;
     for (const p of pts) {
-      const g = svg('g', { class: 'wt-marker' + (p.id === state.activePointId ? ' is-active' : ''), 'data-id': p.id, tabindex: '0', role: 'button',
+      const g = svg('g', { class: 'wt-marker' + (p.id === state.activePointId ? ' is-active' : '') + (state.capture && p.id === state.capture.lastPointId ? ' is-latest' : ''), 'data-id': p.id, tabindex: '0', role: 'button',
         'aria-label': `${s.name} point ${p.seq}${p.media.length ? '' : ' (no media yet)'}` });
       g.dataset.cx = p.x * W; g.dataset.cy = p.y * H;
       if (p.id === state.activePointId) g.append(svg('circle', { class: 'wt-halo', cx: p.x * W, cy: p.y * H }));
@@ -322,6 +323,7 @@ plan.addEventListener('click', async (e) => {
   if (dragMoved || e.target.closest('.wt-marker')) return;
   const p = screenToPlan(e.clientX, e.clientY);
   if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return;
+  if (state.capture) { await captureTap(p); return; }
   if (state.repositionId) {
     const id = state.repositionId; state.repositionId = null; updateEditStatus();
     try { await api(`/points/${id}`, { x: p.x, y: p.y }); toast('Point moved.'); await load(); } catch (err) { toast(err.message, true); }
@@ -381,8 +383,9 @@ $('wt-show-markers').addEventListener('change', (e) => { state.showMarkers = e.t
 
 // ------------------------------------------------------- 360° pano viewer
 class PanoViewer {
-  constructor(container, url, onView) {
+  constructor(container, source, onView) {
     this.container = container; this.onView = onView;
+    const isVideo = typeof source !== 'string';
     this.yaw = 0; this.pitch = 0; this.fov = 75;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -390,9 +393,19 @@ class PanoViewer {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(this.fov, 1, 0.1, 100);
     const geometry = new THREE.SphereGeometry(10, 64, 40); geometry.scale(-1, 1, 1);
-    const loading = el('div', { class: 'wt-pane-empty', text: 'Loading 360° image…' }); container.append(loading);
-    const texture = new THREE.TextureLoader().load(url, () => { loading.remove(); this.render(); },
-      undefined, () => { loading.textContent = 'This 360° image could not be loaded.'; });
+    const loading = el('div', { class: 'wt-pane-empty', text: isVideo ? 'Loading walk video…' : 'Loading 360° image…' }); container.append(loading);
+    let texture;
+    if (isVideo) {
+      this.video = source;
+      texture = new THREE.VideoTexture(source);
+      source.addEventListener('loadeddata', () => loading.remove(), { once: true });
+      source.addEventListener('error', () => { loading.textContent = 'This walk video could not be loaded.'; }, { once: true });
+      // Video frames change continuously, so draw every frame while this view is open.
+      this.renderer.setAnimationLoop(() => this.render());
+    } else {
+      texture = new THREE.TextureLoader().load(source, () => { loading.remove(); this.render(); },
+        undefined, () => { loading.textContent = 'This 360° image could not be loaded.'; });
+    }
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     this.mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: texture }));
@@ -429,6 +442,7 @@ class PanoViewer {
   }
   dispose() {
     this.resizeObserver.disconnect();
+    if (this.video) { this.renderer.setAnimationLoop(null); this.video.pause(); this.video.removeAttribute('src'); this.video.load(); }
     this.mesh.geometry.dispose(); this.mesh.material.map?.dispose(); this.mesh.material.dispose();
     this.renderer.dispose(); this.renderer.forceContextLoss(); this.renderer.domElement.remove();
   }
@@ -491,6 +505,8 @@ function openPoint(pointId, { keepMedia = false } = {}) {
   const found = findPoint(pointId);
   if (!found) return;
   const { session, point } = found;
+  if (session.kind === 'video' && session.video) { openVideoWalk(found); return; }
+  stopVideoWalk();
   if (state.activePointId !== pointId || !keepMedia) state.mediaIndex = 0;
   state.activePointId = pointId;
   const media = pointMedia(point);
@@ -524,7 +540,7 @@ function openPoint(pointId, { keepMedia = false } = {}) {
   drawOverlay(); three?.highlight();
 }
 function closeWindow() {
-  stopPlay(); disposePanes(); win.hidden = true; imm.hidden = true; state.activePointId = null;
+  stopPlay(); stopVideoWalk(); disposePanes(); win.hidden = true; imm.hidden = true; state.activePointId = null;
   try { history.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ }
   drawOverlay(); three?.highlight();
 }
@@ -556,8 +572,9 @@ function updateImmersive(found) {
     dot.addEventListener('click', (e) => { e.stopPropagation(); openPoint(p.id); });
     miniSvg.append(dot);
   }
-  miniSvg.append(svg('rect', { class: 'wt-mini-here', x: px - r * 1.3, y: py - r * 1.3, width: r * 2.6, height: r * 2.6,
+  miniSvg.append(svg('rect', { class: 'wt-mini-here', id: 'wt-mini-here', x: px - r * 1.3, y: py - r * 1.3, width: r * 2.6, height: r * 2.6,
     transform: `rotate(45 ${px} ${py})` }));
+  const crosses = miniSvg.querySelectorAll('.wt-mini-cross'); crosses[0].id = 'wt-mini-vx'; crosses[1].id = 'wt-mini-hy';
   drawCone();
   const dates = datesWithMedia();
   const di = dates.indexOf(session.date);
@@ -576,7 +593,8 @@ function drawCone() {
   if (!cone || !found) return;
   // Heading 0 faces the top of the drawing; the cone widens with the field of view.
   const W = state.planW || 1, R = W * 0.09;
-  const px = found.point.x * W, py = found.point.y * (state.planH || 1);
+  const at = state.miniPos || found.point;
+  const px = at.x * W, py = at.y * (state.planH || 1);
   const half = (state.look.fov / 2) * Math.PI / 180;
   const a1 = state.look.yaw - half, a2 = state.look.yaw + half;
   cone.setAttribute('d', `M${px},${py} L${px + Math.sin(a1) * R},${py - Math.cos(a1) * R} A${R},${R} 0 0 1 ${px + Math.sin(a2) * R},${py - Math.cos(a2) * R} Z`);
@@ -601,6 +619,7 @@ function jumpDate(delta) {
 let playTimer = null;
 function stopPlay() { clearInterval(playTimer); playTimer = null; $('wt-imm-play').textContent = '▶'; $('wt-imm-play').title = 'Play walk'; }
 function togglePlay() {
+  if (state.videoWalk) { const v = state.videoWalk.video; v.paused ? v.play().catch(() => toast('Press play again to start the video.', true)) : v.pause(); return; }
   if (playTimer) { stopPlay(); return; }
   $('wt-imm-play').textContent = '⏸'; $('wt-imm-play').title = 'Pause';
   playTimer = setInterval(() => {
@@ -823,6 +842,7 @@ for (const b of document.querySelectorAll('.wt-mode')) b.addEventListener('click
 function setAdding(on) { state.adding = on; $('wt-add-points')?.setAttribute('aria-pressed', String(on)); plan.classList.toggle('is-adding', on); updateEditStatus(); }
 function setPlacing3d(on) { state.placing3d = on; $('wt-place-3d')?.setAttribute('aria-pressed', String(on)); updateEditStatus(); }
 function updateEditStatus() {
+  updateWalkTools();
   const s = allSessions().find((x) => x.id === state.editSessionId);
   let msg = s ? `Editing: ${s.name}` : 'Create a capture session to start a route';
   if (state.adding) msg = s ? `Click the drawing to add point ${s.points.length + 1} to ${s.name}` : 'Select a session first';
@@ -911,7 +931,432 @@ $('wt-fullscreen').addEventListener('click', () => { document.fullscreenElement 
 $('wt-collapse').addEventListener('click', () => { $('wt-side').classList.toggle('is-collapsed'); setTimeout(() => { if (state.mode === '2d' && state.planW) applyView(); three?.resize(); }, 220); });
 if (window.matchMedia('(max-width: 860px)').matches) $('wt-side').classList.add('is-collapsed');
 
+// ------------------------------------------------------------ video walks
+// A video walk is one 360° video plus the spots the walker tapped, each with the number of
+// seconds into the video. Playing the video moves the marker along the route between taps.
+state.videoWalk = null;
+state.miniPos = null;
+function timedPoints(session) { return session.points.filter((p) => p.t != null).sort((a, b) => a.t - b.t); }
+function fmtTime(sec) { const s = Math.max(0, Math.floor(Number.isFinite(sec) ? sec : 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+function walkPositionAt(session, t) {
+  const pts = timedPoints(session);
+  if (!pts.length) return null;
+  if (t <= pts[0].t) return { x: pts[0].x, y: pts[0].y, point: pts[0] };
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const k = b.t > a.t ? (t - a.t) / (b.t - a.t) : 0;
+      return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, point: a };
+    }
+  }
+  const last = pts[pts.length - 1];
+  return { x: last.x, y: last.y, point: last };
+}
+function setMiniPos(pos) {
+  state.miniPos = pos ? { x: pos.x, y: pos.y } : null;
+  const here = document.getElementById('wt-mini-here');
+  if (!here || !pos) return;
+  const W = state.planW || 1, H = state.planH || 1, px = pos.x * W, py = pos.y * H;
+  const r = Number(here.getAttribute('width')) / 2;
+  here.setAttribute('x', px - r); here.setAttribute('y', py - r); here.setAttribute('transform', `rotate(45 ${px} ${py})`);
+  const vx = document.getElementById('wt-mini-vx'), hy = document.getElementById('wt-mini-hy');
+  vx?.setAttribute('x1', px); vx?.setAttribute('x2', px); hy?.setAttribute('y1', py); hy?.setAttribute('y2', py);
+  drawCone();
+}
+function openVideoWalk(found) {
+  const { session, point } = found;
+  state.activePointId = point.id;
+  const current = state.videoWalk;
+  if (current && current.sessionId === session.id && !imm.hidden) {
+    // Same walk already playing: jump to the chosen spot instead of reloading the video.
+    if (point.t != null) current.video.currentTime = point.t;
+    updateImmersive(found); setMiniPos(walkPositionAt(session, current.video.currentTime) || point); syncVideoUi(); drawOverlay();
+    return;
+  }
+  stopPlay(); stopVideoWalk(); disposePanes();
+  state.viewMode = 'immersive'; win.hidden = true; imm.hidden = false;
+  const body = $('wt-imm-body'); body.replaceChildren(); $('wt-window-body').replaceChildren();
+  const main = el('div', { class: 'wt-pane' }); body.append(main);
+  const video = document.createElement('video');
+  video.crossOrigin = 'anonymous'; video.playsInline = true; video.preload = 'auto'; video.src = session.video.url;
+  const pane = { viewer: null };
+  pane.viewer = new PanoViewer(main, video, (yaw, pitch, fov) => { state.look = { yaw, pitch, fov }; drawCone(); });
+  pane.viewer.setView(state.look.yaw, state.look.pitch, state.look.fov);
+  panes.push(pane);
+  state.videoWalk = { sessionId: session.id, video };
+  const ready = () => {
+    $('wt-imm-scrub').max = String(video.duration || 0);
+    if (point.t != null) video.currentTime = Math.min(point.t, video.duration || point.t);
+    syncVideoUi();
+  };
+  video.addEventListener('loadedmetadata', () => {
+    if (Number.isFinite(video.duration)) { ready(); return; }
+    // Some recorders (e.g. browser WebM) omit the length; seeking to the end makes the browser find it.
+    const found = () => { if (Number.isFinite(video.duration)) { video.removeEventListener('durationchange', found); ready(); } };
+    video.addEventListener('durationchange', found);
+    video.currentTime = 1e101;
+  });
+  for (const name of ['timeupdate', 'seeked']) video.addEventListener(name, onVideoTime);
+  for (const name of ['play', 'pause', 'ended']) video.addEventListener(name, syncVideoUi);
+  $('wt-imm-scrubwrap').hidden = false; $('wt-imm-compare').hidden = true;
+  updateImmersive(found); setMiniPos(point);
+  try { history.replaceState(null, '', '#point=' + point.id); } catch { /* ignore */ }
+  drawOverlay(); three?.highlight();
+}
+function onVideoTime() {
+  const walk = state.videoWalk; if (!walk) return;
+  const session = allSessions().find((s) => s.id === walk.sessionId); if (!session) return;
+  const pos = walkPositionAt(session, walk.video.currentTime);
+  if (pos) {
+    setMiniPos(pos);
+    if (pos.point.id !== state.activePointId) {
+      state.activePointId = pos.point.id;
+      const idx = session.points.findIndex((p) => p.id === pos.point.id);
+      $('wt-imm-count').textContent = `${idx + 1} / ${session.points.length}`;
+      $('wt-imm-first').disabled = $('wt-imm-prev').disabled = idx <= 0;
+      $('wt-imm-last').disabled = $('wt-imm-next').disabled = idx >= session.points.length - 1;
+      drawOverlay();
+    }
+  }
+  syncVideoUi();
+}
+function syncVideoUi() {
+  const walk = state.videoWalk; if (!walk) return;
+  const v = walk.video;
+  if (document.activeElement !== $('wt-imm-scrub')) $('wt-imm-scrub').value = String(v.currentTime || 0);
+  $('wt-imm-time').textContent = `${fmtTime(v.currentTime)} / ${fmtTime(v.duration)}`;
+  $('wt-imm-play').textContent = v.paused ? '▶' : '⏸';
+  $('wt-imm-play').title = v.paused ? 'Play walk' : 'Pause';
+}
+function stopVideoWalk() {
+  if (!state.videoWalk) return;
+  state.videoWalk.video.pause();
+  state.videoWalk = null; state.miniPos = null;
+  $('wt-imm-scrubwrap').hidden = true; $('wt-imm-compare').hidden = false; $('wt-imm-play').textContent = '▶';
+}
+$('wt-imm-scrub').addEventListener('input', (e) => { if (state.videoWalk) state.videoWalk.video.currentTime = Number(e.target.value); });
+
+// ------------------------------------------------------------ field capture
+// Phone-first capture: start a walk on a floor plan, tap where you stand, shoot.
+state.capture = null;
+let captureClock = null;
+const todayLocal = () => new Date().toLocaleDateString('en-CA');
+function openCaptureStart() {
+  if (!sheets().length) { toast('Upload a floor plan first (Edit → Set up → Upload drawing).', true); return; }
+  closeWindow(); setAdding(false);
+  const select = $('wt-cap-sheet');
+  select.replaceChildren(...sheets().map((s) => el('option', { value: s.id, text: `${s.floor ? s.floor + ' · ' : ''}${s.name}` })));
+  select.value = String(state.sheetId);
+  $('wt-cap').hidden = false; $('wt-cap-start').hidden = false; $('wt-cap-bar').hidden = true; $('wt-cap-done').hidden = true;
+}
+async function startCapture() {
+  const sheetId = Number($('wt-cap-sheet').value);
+  const kind = document.querySelector('input[name="wt-cap-kind"]:checked').value;
+  const button = $('wt-cap-go'); button.disabled = true;
+  try {
+    const res = await api('/sessions', { sheet_id: sheetId, date: todayLocal(), kind });
+    if (sheetId !== state.sheetId) { state.sheetId = sheetId; delete plan.dataset.sheet; }
+    state.date = todayLocal(); state.editSessionId = res.id; state.hiddenSessions.clear();
+    state.capture = { sessionId: res.id, kind, startMs: null, lastPointId: null, photos: 0 };
+    document.body.classList.add('is-capturing'); $('wt-side').classList.add('is-collapsed');
+    await load({ keepPoint: false });
+    $('wt-cap-start').hidden = true; $('wt-cap-bar').hidden = false;
+    updateCaptureBar(); state.touched = false; fitView();
+  } catch (err) { toast(err.message, true); } finally { button.disabled = false; }
+}
+function updateCaptureBar() {
+  const c = state.capture; if (!c) return;
+  const session = allSessions().find((s) => s.id === c.sessionId);
+  const count = session ? session.points.length : 0;
+  $('wt-cap-title').textContent = `${session ? session.name : 'Walk'} · ${count} point${count === 1 ? '' : 's'}`;
+  const video = c.kind === 'video';
+  $('wt-cap-timer').hidden = !video || c.startMs != null;
+  $('wt-cap-photo').hidden = video; $('wt-cap-pano-wrap').hidden = video;
+  $('wt-cap-photo').disabled = !c.lastPointId;
+  let hint;
+  if (video && c.startMs == null) hint = 'Start recording on your 360° camera, then press Start walk timer at the same moment.';
+  else if (video) hint = `Recording ${fmtTime((Date.now() - c.startMs) / 1000)} — tap the plan each time you reach a new spot.`;
+  else hint = c.lastPointId ? 'Take a photo here, or tap the plan at your next spot.' : 'Tap the plan where you are standing.';
+  $('wt-cap-hint').textContent = hint;
+  renderQueueStatus();
+}
+async function captureTap(p) {
+  const c = state.capture;
+  if (c.kind === 'video' && c.startMs == null) { toast('Press “Start walk timer” when your camera starts recording.', true); return; }
+  const body = { session_id: c.sessionId, x: p.x, y: p.y, captured_at: new Date().toISOString() };
+  if (c.kind === 'video') body.t = (Date.now() - c.startMs) / 1000;
+  try {
+    const res = await api('/points', body);
+    c.lastPointId = res.id;
+    navigator.vibrate?.(25);
+    await load({ keepPoint: false });
+    updateCaptureBar();
+  } catch (err) { toast(err.message, true); }
+}
+function finishCapture() {
+  const c = state.capture; if (!c) return;
+  clearInterval(captureClock); state.capture = null;
+  document.body.classList.remove('is-capturing');
+  drawOverlay();
+  const session = allSessions().find((s) => s.id === c.sessionId);
+  const n = session ? session.points.length : 0;
+  $('wt-cap-bar').hidden = true;
+  const done = $('wt-cap-done'); done.hidden = false; done.replaceChildren();
+  done.append(el('h2', { text: 'Walk saved' }),
+    el('p', { text: `${session?.name || 'Walk'}: ${n} point${n === 1 ? '' : 's'}${c.kind === 'photo' ? `, ${c.photos} photo${c.photos === 1 ? '' : 's'} taken` : ''}.` }));
+  const row = el('div', { class: 'wt-cap-row' });
+  if (c.kind === 'video') {
+    done.append(el('p', { text: 'Add the 360° video from your camera now, or later from Edit → Walk tools.' }));
+    const input = el('input', { type: 'file', accept: '.mp4,.m4v,.mov,.webm', 'aria-label': 'Walk video' });
+    const bar = el('div', { class: 'wt-cap-progress' }, el('i'));
+    const send = el('button', { class: 'wt-btn big', type: 'button', text: 'Upload walk video' });
+    send.addEventListener('click', async () => {
+      if (!input.files[0]) { toast('Choose the video file first.', true); return; }
+      send.disabled = true;
+      try {
+        await uploadWalkVideo(c.sessionId, input.files[0], (f) => { bar.firstChild.style.width = `${Math.round(f * 100)}%`; send.textContent = `Uploading ${Math.round(f * 100)}%`; });
+        toast('Walk video added.'); done.hidden = true; $('wt-cap').hidden = true;
+        await load();
+        const updated = allSessions().find((s) => s.id === c.sessionId);
+        if (updated?.points[0]) openPoint(updated.points[0].id);
+      } catch (err) { toast(err.message, true); send.disabled = false; send.textContent = 'Upload walk video'; }
+    });
+    done.append(input, bar); row.append(send);
+  } else {
+    row.append(el('button', { class: 'wt-btn big', type: 'button', text: 'Match 360° files…', onclick: () => { state.editSessionId = c.sessionId; openMatcher(); } }));
+  }
+  row.append(el('button', { class: 'wt-btn ghost big', type: 'button', text: 'Done', onclick: () => { done.hidden = true; $('wt-cap').hidden = true; } }));
+  done.append(row);
+}
+function uploadWalkVideo(sessionId, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData(); form.append('file', file);
+    if (file.lastModified) form.append('captured_at', new Date(file.lastModified).toISOString());
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${cfg.apiBase}/sessions/${sessionId}/video`);
+    xhr.setRequestHeader('X-CSRF-Token', window.WT_CSRF);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+    xhr.onload = () => {
+      let body = {}; try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status < 300) resolve(body); else reject(new Error(body.error || `Upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('The upload was interrupted. Check the connection and try again.'));
+    xhr.send(form);
+  });
+}
+$('wt-capture-btn')?.addEventListener('click', openCaptureStart);
+$('wt-cap-cancel')?.addEventListener('click', () => { $('wt-cap').hidden = true; });
+$('wt-cap-go')?.addEventListener('click', startCapture);
+$('wt-cap-timer')?.addEventListener('click', () => {
+  state.capture.startMs = Date.now();
+  clearInterval(captureClock); captureClock = setInterval(updateCaptureBar, 1000);
+  updateCaptureBar(); toast('Timer running — tap the plan at your starting spot.');
+});
+$('wt-cap-photo')?.addEventListener('click', () => $('wt-cap-camera').click());
+$('wt-cap-camera')?.addEventListener('change', async (e) => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file || !state.capture?.lastPointId) return;
+  await enqueueUpload({ pointId: state.capture.lastPointId, kind: $('wt-cap-pano').checked ? 'pano' : 'photo', file, captured_at: new Date().toISOString() });
+  state.capture.photos += 1; toast('Photo saved — uploading in the background.'); updateCaptureBar();
+});
+$('wt-cap-undo')?.addEventListener('click', async () => {
+  const c = state.capture; if (!c) return;
+  const session = allSessions().find((s) => s.id === c.sessionId);
+  const last = session?.points[session.points.length - 1];
+  if (!last) { toast('No points to undo yet.'); return; }
+  try {
+    await api(`/points/${last.id}/delete`);
+    await load({ keepPoint: false });
+    const updated = allSessions().find((s) => s.id === c.sessionId);
+    c.lastPointId = updated?.points.at(-1)?.id || null;
+    drawOverlay(); updateCaptureBar(); toast(`Point ${last.seq} removed.`);
+  } catch (err) { toast(err.message, true); }
+});
+$('wt-cap-finish')?.addEventListener('click', finishCapture);
+
+// ------------------------------------------------- background upload queue
+// Field photos are kept in this browser (IndexedDB) until the server confirms them, so a weak
+// signal or a closed tab does not lose them. Falls back to memory if storage is unavailable.
+const memoryQueue = [];
+let queueBusy = false, queueCount = 0, uploadedSinceLoad = 0;
+function queueDb() {
+  if (!queueDb.promise) {
+    queueDb.promise = new Promise((resolve, reject) => {
+      if (!('indexedDB' in window)) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open('capture-iv-field-uploads', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('uploads', { keyPath: 'id', autoIncrement: true });
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }).catch(() => null);
+  }
+  return queueDb.promise;
+}
+async function queueStore(mode, action) {
+  const db = await queueDb(); if (!db) return null;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('uploads', mode); const req = action(tx.objectStore('uploads'));
+    tx.oncomplete = () => resolve(req?.result); tx.onerror = () => reject(tx.error);
+  });
+}
+async function queueItems() {
+  let stored = [];
+  try { stored = (await queueStore('readonly', (st) => st.getAll())) || []; } catch { stored = []; }
+  return stored.filter((item) => item.project === cfg.project).concat(memoryQueue);
+}
+async function enqueueUpload(item) {
+  const record = { project: cfg.project, pointId: item.pointId, kind: item.kind, blob: item.file,
+    name: item.file.name || `photo-${Date.now()}.jpg`, captured_at: item.captured_at || null };
+  try { const key = await queueStore('readwrite', (st) => st.add(record)); if (key == null) memoryQueue.push(record); }
+  catch { memoryQueue.push(record); }
+  pumpUploads();
+}
+async function dropUpload(item) {
+  if (item.id != null) { try { await queueStore('readwrite', (st) => st.delete(item.id)); } catch { /* ignore */ } }
+  else memoryQueue.splice(memoryQueue.indexOf(item), 1);
+}
+async function pumpUploads() {
+  if (queueBusy || !cfg.canEdit) return;
+  queueBusy = true;
+  try {
+    for (;;) {
+      const items = await queueItems();
+      queueCount = items.length; renderQueueStatus();
+      if (!items.length) break;
+      const item = items[0];
+      const form = new FormData();
+      form.append('files', new File([item.blob], item.name, { type: item.blob.type || 'image/jpeg' }));
+      form.append('kind', item.kind);
+      if (item.captured_at) form.append('captured_at', item.captured_at);
+      try { await api(`/points/${item.pointId}/media`, form, true); await dropUpload(item); uploadedSinceLoad += 1; }
+      catch (err) {
+        if (err.status === 401 || err.status === 403) { toast('Sign in again to finish uploading; your photos are kept on this device.', true); break; }
+        if (err.status && err.status < 500) { await dropUpload(item); toast(`A photo could not be added: ${err.message}`, true); continue; }
+        await new Promise((r) => setTimeout(r, 6000)); // offline or server busy: try again shortly
+      }
+    }
+  } finally { queueBusy = false; }
+  if (uploadedSinceLoad) {
+    const n = uploadedSinceLoad; uploadedSinceLoad = 0;
+    await load(); updateCaptureBar();
+    if (!state.capture) toast(`${n} upload${n === 1 ? '' : 's'} finished.`);
+  }
+}
+function renderQueueStatus() {
+  const box = $('wt-cap-queue');
+  if (box) box.textContent = queueCount ? `${queueCount} photo${queueCount === 1 ? '' : 's'} waiting to upload` : '';
+}
+window.addEventListener('online', pumpUploads);
+window.addEventListener('beforeunload', (e) => { if (queueCount) { e.preventDefault(); e.returnValue = ''; } });
+
+// ------------------------------------------------------ 360 file matching
+// After a photo walk, 360° files from the camera are matched to the tapped points by time.
+let matchPlan = [];
+async function cameraTime(file) {
+  try {
+    const head = new Uint8Array(await file.slice(0, 262144).arrayBuffer());
+    const m = new TextDecoder('latin1').decode(head).match(/(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]); // EXIF times are camera local time
+  } catch { /* unreadable */ }
+  return file.lastModified ? new Date(file.lastModified) : null;
+}
+function openMatcher() {
+  const session = allSessions().find((s) => s.id === state.editSessionId);
+  if (!session) { toast('Select a walk first.', true); return; }
+  if (!session.points.length) { toast('This walk has no points yet.', true); return; }
+  $('wt-cap').hidden = true;
+  $('wt-match').hidden = false; $('wt-match-files').value = ''; $('wt-match-list').replaceChildren();
+  $('wt-match-upload').disabled = true; $('wt-match-upload').textContent = 'Upload matched files'; matchPlan = [];
+  $('wt-match').querySelector('h2').textContent = `Match 360° files to “${session.name}”`;
+}
+async function buildMatch() {
+  const session = allSessions().find((s) => s.id === state.editSessionId); if (!session) return;
+  const files = [...$('wt-match-files').files]; if (!files.length) return;
+  const mode = document.querySelector('input[name="wt-match-mode"]:checked').value;
+  const timed = await Promise.all(files.map(async (file) => ({ file, time: await cameraTime(file) })));
+  timed.sort((a, b) => ((a.time?.getTime() ?? 0) - (b.time?.getTime() ?? 0)) || a.file.name.localeCompare(b.file.name));
+  matchPlan = timed.map((entry) => ({ ...entry, point: null, diff: null }));
+  if (mode === 'order') {
+    matchPlan.forEach((m, i) => { m.point = session.points[i] || null; });
+  } else {
+    const pts = session.points.filter((p) => p.captured_at);
+    if (!pts.length) toast('This walk has no tap times (it was not made with Field capture). Use “In order”.', true);
+    // Order-preserving match (files and taps both follow the walk): the alignment with the
+    // smallest total time difference, never pairing more than 10 minutes apart.
+    const MAX = 10 * 60 * 1000;
+    const files = matchPlan.filter((m) => m.time);
+    const taps = [...pts].sort((a, b) => new Date(a.captured_at) - new Date(b.captured_at));
+    const n = files.length, k = taps.length;
+    const cost = Array.from({ length: n + 1 }, () => new Array(k + 1).fill(0));
+    const move = Array.from({ length: n + 1 }, () => new Array(k + 1).fill(''));
+    for (let i = 1; i <= n; i++) { cost[i][0] = i * MAX; move[i][0] = 'skipFile'; }
+    for (let j = 1; j <= k; j++) move[0][j] = 'skipTap';
+    for (let i = 1; i <= n; i++) {
+      for (let j = 1; j <= k; j++) {
+        const d = Math.abs(files[i - 1].time - new Date(taps[j - 1].captured_at));
+        let best = cost[i - 1][j] + MAX, how = 'skipFile';
+        if (cost[i][j - 1] < best) { best = cost[i][j - 1]; how = 'skipTap'; }
+        if (d <= MAX && cost[i - 1][j - 1] + d < best) { best = cost[i - 1][j - 1] + d; how = 'pair'; }
+        cost[i][j] = best; move[i][j] = how;
+      }
+    }
+    for (let i = n, j = k; i > 0 || j > 0;) {
+      const how = move[i][j];
+      if (how === 'pair') {
+        files[i - 1].point = taps[j - 1];
+        files[i - 1].diff = Math.round(Math.abs(files[i - 1].time - new Date(taps[j - 1].captured_at)) / 1000);
+        i--; j--;
+      } else if (how === 'skipFile') i--; else j--;
+    }
+  }
+  const list = $('wt-match-list'); list.replaceChildren();
+  for (const m of matchPlan) {
+    list.append(el('div', {}, el('span', { text: `${m.file.name}${m.time ? ' · ' + m.time.toLocaleTimeString() : ''}` }),
+      m.point ? el('span', { text: `→ Point ${m.point.seq}${m.diff != null ? ` (${m.diff}s apart)` : ''}` }) : el('span', { class: 'miss', text: 'no match' })));
+  }
+  const n = matchPlan.filter((m) => m.point).length;
+  $('wt-match-upload').disabled = !n; $('wt-match-upload').textContent = `Upload ${n} matched file${n === 1 ? '' : 's'}`;
+}
+$('wt-match-open')?.addEventListener('click', openMatcher);
+$('wt-match-files')?.addEventListener('change', buildMatch);
+document.querySelectorAll('input[name="wt-match-mode"]').forEach((radio) => radio.addEventListener('change', buildMatch));
+$('wt-match-close')?.addEventListener('click', () => { $('wt-match').hidden = true; });
+$('wt-match-upload')?.addEventListener('click', async () => {
+  const items = matchPlan.filter((m) => m.point);
+  for (const m of items) await enqueueUpload({ pointId: m.point.id, kind: 'pano', file: m.file, captured_at: m.time ? m.time.toISOString() : null });
+  $('wt-match').hidden = true;
+  toast(`${items.length} file${items.length === 1 ? '' : 's'} queued — uploading in the background.`);
+});
+
+// ------------------------------------------------------------ walk tools
+function updateWalkTools() {
+  if (!$('wt-tools-walk')) return;
+  const s = allSessions().find((x) => x.id === state.editSessionId);
+  $('wt-tools-walk').hidden = !s;
+  const video = s?.kind === 'video';
+  $('wt-tools-photo').hidden = !s || video; $('wt-tools-video').hidden = !video;
+  if (s) $('wt-tools-walk').querySelector('summary').textContent = `Walk tools: ${s.name}`;
+}
+$('wt-video-upload')?.addEventListener('click', async () => {
+  const file = $('wt-video-file').files[0];
+  if (!file) { toast('Choose the walk video first.', true); return; }
+  const button = $('wt-video-upload'); button.disabled = true;
+  try {
+    await uploadWalkVideo(state.editSessionId, file, (f) => { button.textContent = `Uploading ${Math.round(f * 100)}%`; });
+    toast('Walk video added.'); $('wt-video-file').value = ''; await load();
+  } catch (err) { toast(err.message, true); }
+  finally { button.disabled = false; button.textContent = 'Upload walk video'; }
+});
+$('wt-shift-apply')?.addEventListener('click', async () => {
+  const seconds = Number($('wt-shift-seconds').value);
+  if (!seconds) return;
+  try {
+    await api(`/sessions/${state.editSessionId}/shift`, { seconds });
+    toast(`Positions moved ${seconds > 0 ? 'later' : 'earlier'} by ${Math.abs(seconds)} s.`); await load();
+  } catch (err) { toast(err.message, true); }
+});
+
 load({ keepPoint: false }).then(() => {
+  pumpUploads();
   // Open a shared location link (#point=123) once the project has loaded.
   const match = /#point=(\d+)/.exec(location.hash);
   const target = match && findPoint(Number(match[1]));

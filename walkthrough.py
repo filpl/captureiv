@@ -10,6 +10,7 @@ import hashlib
 import math
 import os
 import re
+from datetime import datetime, timezone
 
 from flask import (Blueprint, abort, current_app, g, jsonify, redirect, render_template, request,
                    send_from_directory, session, url_for)
@@ -57,6 +58,33 @@ def _fraction(value):
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) and 0.0 <= number <= 1.0 else None
+
+
+def _seconds(value):
+    """Seconds into a walk video (0 to 24 hours), or None."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and 0.0 <= number <= 86400.0 else None
+
+
+def _timestamp(value):
+    """An ISO timestamp from the browser or camera, stored as naive UTC; None if unusable."""
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc).replace(tzinfo=None)
+    return moment if 2000 <= moment.year <= 2100 else None
+
+
+def utc_iso(moment):
+    """Stored times are naive UTC; mark them as UTC so browsers do not read them as local time."""
+    return moment.isoformat(timespec="seconds") + "Z" if moment else None
 
 
 def _coordinate(value):
@@ -197,17 +225,23 @@ def create_walkthrough_blueprint(core):
         points = (Point.query.filter_by(company_id=company_id, project=project)
                   .order_by(Point.session_id, Point.seq).all())
         media = Media.query.filter_by(company_id=company_id, project=project).order_by(Media.id).all()
-        media_by_point = {}
+        media_by_point, walk_videos = {}, {}
+        session_of_point = {point.id: point.session_id for point in points}
         for item in media:
-            media_by_point.setdefault(item.point_id, []).append({
-                "id": item.id, "kind": item.kind, "name": item.original_filename,
-                "url": file_url("media", item, token)})
+            entry = {"id": item.id, "kind": item.kind, "name": item.original_filename,
+                     "url": file_url("media", item, token),
+                     "captured_at": utc_iso(item.captured_at)}
+            if item.kind == "walkvideo":
+                walk_videos[session_of_point.get(item.point_id)] = entry
+            else:
+                media_by_point.setdefault(item.point_id, []).append(entry)
         points_by_session = {}
         for point in points:
             points_by_session.setdefault(point.session_id, []).append({
                 "id": point.id, "seq": point.seq, "x": point.x, "y": point.y, "label": point.label,
                 "model_id": point.model_id,
                 "m": [point.mx, point.my, point.mz] if point.mx is not None else None,
+                "t": point.t, "captured_at": utc_iso(point.captured_at),
                 "media": media_by_point.get(point.id, [])})
         return {
             "project": project,
@@ -216,7 +250,8 @@ def create_walkthrough_blueprint(core):
             "models": [{"id": m.id, "floor": m.floor, "name": m.name,
                         "url": file_url("model", m, token)} for m in models],
             "sessions": [{"id": s.id, "sheet_id": s.sheet_id, "name": s.name,
-                          "date": s.capture_date.isoformat(), "color": s.color,
+                          "date": s.capture_date.isoformat(), "color": s.color, "kind": s.kind or "photo",
+                          "video": walk_videos.get(s.id),
                           "points": points_by_session.get(s.id, [])} for s in sessions],
         }
 
@@ -431,8 +466,10 @@ def create_walkthrough_blueprint(core):
         if not color:
             used = WalkSession.query.filter_by(company_id=sheet.company_id, project=sheet.project).count()
             color = DEFAULT_COLORS[used % len(DEFAULT_COLORS)]
+        kind = "video" if body.get("kind") == "video" else "photo"
+        default_name = ("Video walk " if kind == "video" else "Walk ") + capture_date.strftime("%b %d, %Y")
         row = WalkSession(project=sheet.project, sheet_id=sheet.id, capture_date=capture_date, color=color,
-                          name=_clean(body.get("name"), 160) or f"Walk {capture_date.strftime('%b %d, %Y')}")
+                          kind=kind, name=_clean(body.get("name"), 160) or default_name)
         db.session.add(row)
         db.session.commit()
         core.audit("walkthrough_session_create", "project", sheet.project, f"Created capture session {row.name}")
@@ -472,6 +509,55 @@ def create_walkthrough_blueprint(core):
                    f"Deleted capture session {name} with {len(point_ids)} points and {len(filenames)} files")
         return jsonify({"ok": True})
 
+    @bp.post("/api/sessions/<int:session_id>/video")
+    def upload_walk_video(session_id):
+        """Attach (or replace) the 360 video of a video walk."""
+        row = owned(WalkSession, session_id)
+        require_edit(row.project)
+        if (row.kind or "photo") != "video":
+            return error("This is a photo walk. Start a video walk to attach a walk video.")
+        first = (Point.query.filter_by(session_id=row.id, company_id=row.company_id)
+                 .order_by(Point.seq).first())
+        if not first:
+            return error("Mark at least one position on the plan before adding the video.")
+        stored_files, old_files = [], []
+        try:
+            _ext, stored = store(request.files.get("file"), VIDEO_TYPES, MAX_VIDEO_BYTES, "video")
+            stored_files.append(stored)
+            point_ids = [p.id for p in Point.query.filter_by(session_id=row.id, company_id=row.company_id).all()]
+            previous = Media.query.filter(Media.point_id.in_(point_ids), Media.kind == "walkvideo",
+                                          Media.company_id == row.company_id).all()
+            old_files = [item.filename for item in previous]
+            for item in previous:
+                db.session.delete(item)
+            video = Media(project=row.project, point_id=first.id, kind="walkvideo", filename=stored[0],
+                          original_filename=stored[3], file_size=stored[1],
+                          captured_at=_timestamp(request.form.get("captured_at")))
+            commit_upload([video], stored_files)
+        except Exception as exc:
+            return upload_failed(exc, stored_files, "walk video")
+        for filename in old_files:
+            core.delete_stored_file(filename)
+        core.audit("walkthrough_video_upload", "project", row.project, f"Attached walk video to {row.name}")
+        return jsonify({"ok": True, "id": video.id})
+
+    @bp.post("/api/sessions/<int:session_id>/shift")
+    def shift_session_times(session_id):
+        """Line the marked positions up with the video by moving them all earlier or later."""
+        row = owned(WalkSession, session_id)
+        require_edit(row.project)
+        try:
+            delta = float(json_body().get("seconds"))
+        except (TypeError, ValueError):
+            return error("Enter how many seconds to shift.")
+        if not math.isfinite(delta) or abs(delta) > 3600:
+            return error("Shift by at most one hour.")
+        for point in Point.query.filter_by(session_id=row.id, company_id=row.company_id).all():
+            if point.t is not None:
+                point.t = max(0.0, point.t + delta)
+        db.session.commit()
+        return jsonify({"ok": True})
+
     # --------------------------------------------------------------- points
     def renumber(session_row):
         for index, point in enumerate(Point.query.filter_by(session_id=session_row.id, company_id=session_row.company_id)
@@ -492,7 +578,8 @@ def create_walkthrough_blueprint(core):
         last = (Point.query.filter_by(session_id=session_row.id, company_id=session_row.company_id)
                 .order_by(Point.seq.desc()).first())
         row = Point(project=session_row.project, session_id=session_row.id, seq=(last.seq + 1) if last else 1,
-                    x=x, y=y, label=_clean(body.get("label"), 120))
+                    x=x, y=y, label=_clean(body.get("label"), 120),
+                    t=_seconds(body.get("t")), captured_at=_timestamp(body.get("captured_at")))
         db.session.add(row)
         db.session.commit()
         return jsonify({"ok": True, "id": row.id, "seq": row.seq})
@@ -509,6 +596,8 @@ def create_walkthrough_blueprint(core):
             row.x, row.y = x, y
         if "label" in body:
             row.label = _clean(body.get("label"), 120)
+        if "t" in body:
+            row.t = _seconds(body.get("t"))
         if body.get("clear_3d"):
             row.model_id = row.mx = row.my = row.mz = None
         elif "m" in body:
@@ -531,6 +620,12 @@ def create_walkthrough_blueprint(core):
         if not can_delete() and Media.query.filter_by(point_id=row.id, company_id=row.company_id).first():
             return error("Only an administrator can delete a point that has media.", 403)
         session_row = db.session.get(WalkSession, row.session_id)
+        # A walk video hangs off one point of its session; keep it when that point goes.
+        other = (Point.query.filter(Point.session_id == row.session_id, Point.company_id == row.company_id,
+                                    Point.id != row.id).order_by(Point.seq).first())
+        if other:
+            Media.query.filter_by(point_id=row.id, company_id=row.company_id, kind="walkvideo").update(
+                {"point_id": other.id}, synchronize_session=False)
         media = Media.query.filter_by(point_id=row.id, company_id=row.company_id).all()
         filenames = [item.filename for item in media]
         for item in media:
@@ -566,6 +661,7 @@ def create_walkthrough_blueprint(core):
         if not files or len(files) > 20:
             return error("Choose between 1 and 20 files for this location.")
         requested = request.form.get("kind", "auto")
+        captured_at = _timestamp(request.form.get("captured_at"))
         stored_files, rows = [], []
         try:
             for item in files:
@@ -578,7 +674,7 @@ def create_walkthrough_blueprint(core):
                     kind = "pano" if requested == "pano" else "photo"
                 stored_files.append(stored)
                 rows.append(Media(project=row.project, point_id=row.id, kind=kind, filename=stored[0],
-                                  original_filename=stored[3], file_size=stored[1]))
+                                  original_filename=stored[3], file_size=stored[1], captured_at=captured_at))
             commit_upload(rows, stored_files)
         except Exception as exc:
             return upload_failed(exc, stored_files, "media")

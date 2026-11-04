@@ -83,6 +83,44 @@ class WalkthroughTests(unittest.TestCase):
         self.assertEqual(session.status_code, 200, session.get_data(as_text=True))
         return sheet.get_json()["id"], session.get_json()["id"]
 
+    # ------------------------------------------------------- field capture
+    def test_video_walk_keeps_timing_and_video_through_edits(self):
+        admin = self.client_for("admin")
+        sheet = self.post(admin, "/walkthrough/api/sheets", content_type="multipart/form-data", data={
+            "project": "Tower A", "file": (BytesIO(PDF), "plan.pdf")}).get_json()["id"]
+        walk = self.post(admin, "/walkthrough/api/sessions", json={"sheet_id": sheet, "date": "2026-11-04", "kind": "video"})
+        session_id = walk.get_json()["id"]
+        ids = [self.post(admin, "/walkthrough/api/points", json={
+            "session_id": session_id, "x": x, "y": 0.5, "t": t, "captured_at": "2026-11-04T15:00:%02dZ" % int(t)}).get_json()["id"]
+            for x, t in ((0.1, 0.0), (0.5, 12.5), (0.9, 30.0))]
+        self.assertEqual(self.post(admin, "/walkthrough/api/points", json={
+            "session_id": session_id, "x": 0.2, "y": 0.2, "t": -4}).status_code, 200)  # bad time is dropped, point kept
+        video = self.post(admin, f"/walkthrough/api/sessions/{session_id}/video", content_type="multipart/form-data",
+                          data={"file": (BytesIO(MP4), "walk.mp4")})
+        self.assertEqual(video.status_code, 200, video.get_data(as_text=True))
+        self.assertEqual(self.post(admin, f"/walkthrough/api/sessions/{session_id}/shift", json={"seconds": 2}).status_code, 200)
+        # Deleting the point the video hangs off must keep the video.
+        self.assertEqual(self.post(admin, f"/walkthrough/api/points/{ids[0]}/delete").status_code, 200)
+        data = admin.get("/walkthrough/api/data?project=Tower%20A").get_json()
+        session = next(s for s in data["sessions"] if s["id"] == session_id)
+        self.assertEqual(session["kind"], "video")
+        self.assertIsNotNone(session["video"])
+        self.assertEqual([p["t"] for p in session["points"]], [14.5, 32.0, None])
+        self.assertEqual(session["points"][0]["captured_at"], "2026-11-04T15:00:12Z")
+        self.assertTrue(all(not p["media"] for p in session["points"]))  # the walk video is not point media
+        photo_walk = self.post(admin, "/walkthrough/api/sessions", json={"sheet_id": sheet, "date": "2026-11-04"}).get_json()["id"]
+        point = self.post(admin, "/walkthrough/api/points", json={"session_id": photo_walk, "x": 0.3, "y": 0.3}).get_json()["id"]
+        self.assertEqual(self.post(admin, f"/walkthrough/api/sessions/{photo_walk}/video", content_type="multipart/form-data",
+                                   data={"file": (BytesIO(MP4), "walk.mp4")}).status_code, 400)
+        media = self.post(admin, f"/walkthrough/api/points/{point}/media", content_type="multipart/form-data",
+                          data={"kind": "pano", "captured_at": "2026-11-04T10:42:13-05:00", "files": [(BytesIO(PNG), "shot.png")]})
+        self.assertEqual(media.status_code, 200)
+        data = admin.get("/walkthrough/api/data?project=Tower%20A").get_json()
+        shot = next(s for s in data["sessions"] if s["id"] == photo_walk)["points"][0]["media"][0]
+        self.assertEqual(shot["captured_at"], "2026-11-04T15:42:13Z")
+        self.assertEqual(self.post(self.client_for("outsider"), f"/walkthrough/api/sessions/{session_id}/shift",
+                                   json={"seconds": 1}).status_code, 404)
+
     # ------------------------------------------------------------ services
     def test_walkthrough_requires_the_granted_service(self):
         self.assertEqual(self.client_for("plain").get("/walkthrough/").status_code, 403)

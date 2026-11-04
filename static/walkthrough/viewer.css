@@ -146,3 +146,45 @@ button,input,select{font:inherit;color:inherit}
   .wt-window{left:8px!important;right:8px;top:auto!important;bottom:8px;width:auto!important;height:55vh!important}
   .wt-stage-wrap{margin-left:44px}
 }
+
+/* Field capture: bottom sheet sized for thumbs on a phone. */
+.wt-btn.capture{background:#dc2626;border-color:#dc2626}
+.wt-btn.capture:hover{background:#b91c1c}
+.wt-btn.big{padding:12px 16px;font-size:15px;border-radius:10px}
+.wt-cap{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);width:min(560px,calc(100vw - 16px));z-index:30;background:var(--wt-panel);border:1px solid var(--wt-line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:14px}
+.wt-cap h2{margin:0 0 10px;font-size:17px}
+.wt-cap select{width:100%;margin:4px 0 12px;background:var(--wt-panel-2);border:1px solid var(--wt-line);border-radius:8px;padding:10px;color:var(--wt-text)}
+.wt-cap-kinds{display:grid;gap:8px;margin-bottom:12px}
+.wt-cap-kind{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--wt-line);border-radius:10px;cursor:pointer}
+.wt-cap-kind:has(input:checked){border-color:var(--wt-blue);background:rgba(59,130,246,.12)}
+.wt-cap-kind small{display:block;color:var(--wt-muted);font-size:12px;margin-top:2px}
+.wt-cap-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.wt-cap-status{display:flex;flex-direction:column;gap:3px;margin-bottom:10px}
+.wt-cap-status span{color:var(--wt-muted);font-size:13px}
+.wt-cap-queue:empty{display:none}
+.wt-cap-queue{color:#fbbf24!important}
+.wt-cap-toggle{display:flex;align-items:center;gap:6px;font-size:13px;padding:0 4px}
+.wt-cap-done p{margin:0 0 10px;color:var(--wt-muted);font-size:13px}
+.wt-cap-done input[type=file]{margin:0 0 10px;max-width:100%}
+.wt-cap-progress{height:6px;background:var(--wt-panel-2);border-radius:99px;overflow:hidden;margin:6px 0 10px}
+.wt-cap-progress i{display:block;height:100%;width:0;background:var(--wt-blue);transition:width .2s}
+body.is-capturing .wt-timeline,body.is-capturing .wt-toolbar,body.is-capturing .wt-edit-bar{display:none!important}
+body.is-capturing .wt-plan{cursor:crosshair}
+.wt-marker.is-latest circle.wt-dot{stroke:#fbbf24;stroke-width:3}
+/* Matching dialog */
+.wt-modal{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:12px}
+.wt-modal-card{width:min(640px,100%);max-height:calc(100vh - 24px);overflow:auto;background:var(--wt-panel);border:1px solid var(--wt-line);border-radius:14px;padding:18px}
+.wt-modal-card h2{margin:0 0 8px;font-size:17px}
+.wt-modal-card input[type=file]{margin:10px 0}
+.wt-match-list{display:grid;gap:4px;margin:10px 0;font-size:13px}
+.wt-match-list div{display:grid;grid-template-columns:1fr auto;gap:10px;padding:6px 8px;border-radius:6px;background:var(--wt-panel-2)}
+.wt-match-list .miss{color:#fca5a5}
+/* Video walk scrubber */
+.wt-scrub{gap:8px;padding:4px 10px}
+.wt-scrub input{width:min(320px,40vw);accent-color:var(--wt-blue)}
+.wt-scrub span{font-variant-numeric:tabular-nums;min-width:42px}
+@media (max-width:860px){.wt-scrub input{width:46vw}.wt-btn.capture{padding:5px 8px}}
+
+@media (max-width:520px){#wt-share,#wt-settings{display:none}.wt-top-actions .wt-btn{font-size:12px}.wt-top{row-gap:6px}}
+
+@media (max-width:860px){.wt-edit-bar{left:56px;right:56px;transform:none;flex-wrap:wrap;border-radius:12px;justify-content:center;font-size:12px}}
