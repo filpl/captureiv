@@ -29,8 +29,9 @@ class LegalPagesTests(unittest.TestCase):
     def test_pages_state_the_approved_billing_and_retention_policies(self):
         client = portal.app.test_client()
         billing = client.get("/legal/billing").data
-        for fact in (b"USD 399.00", b"USD 4,548.60", b"90 days", b"renew automatically", b"end of the current paid billing period"):
+        for fact in (b"USD 399.00", b"USD 4,788.00", b"no discount", b"90 days", b"renew automatically", b"end of the current paid billing period"):
             self.assertIn(fact, billing)
+        self.assertNotIn(b"4,548.60", billing)
         refunds = client.get("/legal/refunds").data
         self.assertIn(b"not refunded automatically", refunds)
         self.assertIn(b"No prorated formula or refund is guaranteed", refunds)
