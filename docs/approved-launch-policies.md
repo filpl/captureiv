@@ -6,8 +6,8 @@ Implementation remains local until merged, deployed and verified.
 
 ## Subscription billing
 
-Basic costs USD399 per month or USD4,548.60 per year, per company. Annual billing
-is 5% below twelve monthly payments. Subscriptions renew automatically.
+Basic costs USD399 per month or USD4,788 per year, per company. Annual billing
+equals twelve monthly payments (no discount; changed November 4, 2026). Subscriptions renew automatically.
 Cancellation takes effect at the paid billing period's end. Monthly payments
 are not automatically refunded except where required by law or an approved
 exception. Annual refund requests receive manual review, without a guaranteed

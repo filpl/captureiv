@@ -229,6 +229,7 @@ SITE_BOUNDARY_SCHEMA_REVISION = "0017_project_site_boundary"
 SITE_BOUNDARY_NAME_SCHEMA_REVISION = "0019_project_site_boundary_name"
 PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
 BASIC_MONTHLY_PRICE_CENTS = 39900
+BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 BASIC_PROJECT_LIMIT = 1
 BASIC_ACCOUNT_LIMIT = 2
 BASIC_STORAGE_LIMIT_BYTES = 1_000_000_000_000  # 1 TB in decimal bytes.
@@ -5498,7 +5499,7 @@ def configure_basic_billing(monthly_price_id, annual_price_id):
         raise click.ClickException("Initialize the database and Basic plan first.")
     expected_mode = app.config.get("APP_ENV") == "production"
     for price_id, interval, amount in ((monthly_price_id, "month", 39900),
-                                       (annual_price_id, "year", 454860)):
+                                       (annual_price_id, "year", BASIC_ANNUAL_PRICE_CENTS)):
         if not re.fullmatch(r"price_[A-Za-z0-9]+", price_id):
             raise click.ClickException("Invalid Stripe Price ID; no plan settings changed.")
         try:
@@ -5517,7 +5518,7 @@ def configure_basic_billing(monthly_price_id, annual_price_id):
     plan.stripe_monthly_price_id = monthly_price_id
     plan.stripe_annual_price_id = annual_price_id
     plan.monthly_amount_cents = 39900
-    plan.annual_amount_cents = 454860
+    plan.annual_amount_cents = BASIC_ANNUAL_PRICE_CENTS
     db.session.commit()
     print("Approved Basic monthly and annual prices verified and configured.")
 

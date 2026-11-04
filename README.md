@@ -59,7 +59,7 @@ The **Photos** tab on the same upload and mapping page uses that project site im
 
 ## SaaS account and billing foundation
 
-The standalone marketing site lives in `landing-page/` and links into the Flask app for Basic registration and enterprise requests. Basic is fixed at $399/month with one active project, two authenticated accounts, and 1 TB of total occupied storage. Authorized public viewers are unlimited. Annual Basic billing stays unavailable until the Platform Owner approves an amount and configures its matching Stripe Price ID. Enterprise remains custom priced and scoped under its existing agreements.
+The standalone marketing site lives in `landing-page/` and links into the Flask app for Basic registration and enterprise requests. Basic is fixed at $399/month with one active project, two authenticated accounts, and 1 TB of total occupied storage. Authorized public viewers are unlimited. Annual Basic billing is $4,788/year (twelve months at $399, no discount) and stays unavailable until its matching Stripe Price ID is configured. Enterprise remains custom priced and scoped under its existing agreements.
 
 New registrations remain pending until email verification and a signed Stripe test webhook confirms billing. With no SMTP configured in local development, the app shows a local verification link. The owner account is the existing `admin` account unless `ADMIN_USERNAME` is set. Company data queries are scoped by active company membership; uploads are associated with that company and checked against the configured storage allowance. Existing data is assigned to a retained “Legacy workspace” during the additive migration.
 

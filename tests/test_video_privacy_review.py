@@ -21,7 +21,7 @@ class VideoPrivacyReviewTests(unittest.TestCase):
             company=portal.Company(name='Video review fixture',status='pending')
             user=portal.User(username='video-review@example.test',email='video-review@example.test',name='Test',email_verified=True,active=False)
             user.set_password('test-disposable-password')
-            plan=portal.SubscriptionPlan(name='Basic',monthly_amount_cents=39900,annual_amount_cents=454860,
+            plan=portal.SubscriptionPlan(name='Basic',monthly_amount_cents=39900,annual_amount_cents=478800,
                 stripe_monthly_price_id='price_fixture_monthly',stripe_annual_price_id='price_fixture_annual')
             portal.db.session.add_all([company,user,plan]);portal.db.session.flush()
             membership=portal.CompanyMembership(company_id=company.id,user_id=user.id,role='company_admin',status='verified_pending_billing')
@@ -47,7 +47,7 @@ class VideoPrivacyReviewTests(unittest.TestCase):
         return self.client.post(self.path,data=data)
 
     def test_disclosures_are_next_to_consent_and_payment_for_each_interval(self):
-        for interval,amount,period in [('monthly','$399.00','month'),('annual','$4548.60','year')]:
+        for interval,amount,period in [('monthly','$399.00','month'),('annual','$4788.00','year')]:
             with portal.app.app_context():
                 portal.db.session.get(portal.CompanySubscription,self.subscription_id).billing_interval=interval
                 portal.db.session.commit()
