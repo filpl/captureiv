@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% from '_logo.html' import civ_logo %}{% extends 'base.html' %}
 {% block title %}Sign in{% endblock %}
 {% block head_extra %}
 <style>
@@ -13,7 +13,7 @@
 {% endblock %}
 {% block content %}
 <section class="login-card">
-  <div class="brand large"><span class="brand-mark">△</span><span>CAPTURE IV<small>Intelligence Visuals</small></span></div>
+  <div class="brand large civ-brand">{{ civ_logo('light', 'Capture Intelligence Visualized') }}</div>
   <p class="eyebrow">PROJECT MEDIA PORTAL</p>
   <h1>Welcome back</h1>
   <p class="muted">Sign in to view project flights and documents.</p>

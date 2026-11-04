@@ -1,5 +1,5 @@
-<header class="topbar platform-topbar">
-  <a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-mark">△</span><span>CAPTURE IV<small>Intelligence Visuals</small></span></a>
+{% from '_logo.html' import civ_logo %}<header class="topbar platform-topbar">
+  <a class="brand civ-brand" href="{{ url_for('dashboard') }}" aria-label="Capture IV archive">{{ civ_logo('light') }}</a>
   <nav class="platform-nav" aria-label="Main navigation">
     {% set links = [('archive', 'dashboard', 'Archive')] %}
     {% if g.retrieval_only %}{% set links = [('archive', 'retrieve_workspace', 'Retrieve files')] %}
