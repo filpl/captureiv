@@ -416,6 +416,7 @@ class TenantIsolationTests(unittest.TestCase):
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', invite.data).group(1).decode()
         completed = employee_client.post(invite_url, data={
             "_csrf": csrf, "password": "employee-password-123", "confirm_password": "employee-password-123",
+            "accept_policies": "yes",
         })
         self.assertEqual(completed.status_code, 302)
         self.assertTrue(completed.location.endswith("/login"))
@@ -1370,6 +1371,7 @@ class TenantIsolationTests(unittest.TestCase):
         setup_csrf = re.search(rb'name="_csrf" value="([^"]+)"', setup.data).group(1).decode()
         response = client.post(setup_url, data={
             "_csrf": setup_csrf, "password": "enterprise-password-123", "confirm_password": "enterprise-password-123",
+            "accept_policies": "yes",
         })
         self.assertEqual(response.status_code, 302)
         self.assertIn("/account/checkout/", response.location)

@@ -65,7 +65,7 @@ class LaunchReadinessTests(unittest.TestCase):
         def approved_price(method, path):
             monthly = path == 'prices/price_monthly'
             return {'id': path.split('/')[-1], 'active': True, 'livemode': False,
-                    'currency': 'usd', 'unit_amount': 39900 if monthly else 454860,
+                    'currency': 'usd', 'unit_amount': 39900 if monthly else 478800,
                     'recurring': {'interval': 'month' if monthly else 'year', 'interval_count': 1}}
         runner = portal.app.test_cli_runner()
         args = ['configure-basic-billing', '--monthly-price-id', 'price_monthly',
@@ -74,7 +74,7 @@ class LaunchReadinessTests(unittest.TestCase):
             self.assertEqual(runner.invoke(args=args).exit_code, 0)
             self.assertEqual(runner.invoke(args=args).exit_code, 0)
         portal.db.session.refresh(plan)
-        self.assertEqual(plan.annual_amount_cents, 454860)
+        self.assertEqual(plan.annual_amount_cents, 478800)
         self.assertEqual(plan.stripe_annual_price_id, 'price_annual')
 
     def test_billing_bootstrap_rejects_a_price_mismatch_without_partial_changes(self):

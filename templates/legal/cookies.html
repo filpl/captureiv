@@ -1,0 +1,20 @@
+{% extends "legal/_base.html" %}
+{% block meta %}<p class="legal-meta">Version {{ legal.privacy_version }}</p>{% endblock %}
+{% block body %}
+<p>Capture IV uses only the cookie needed to run the platform securely. We do not use advertising or analytics cookies.</p>
+
+<h2>Cookie we set</h2>
+<table class="legal-table"><thead><tr><th>Name</th><th>Purpose</th><th>Duration</th></tr></thead>
+<tbody><tr><td><code>session</code></td><td>Keeps you signed in, protects forms against cross-site request forgery, and remembers that you unlocked a shared project with its code.</td><td>Ends when you close your browser or sign out.</td></tr></tbody></table>
+<p>This cookie is strictly necessary: the platform cannot work without it, so it is not optional. It is marked HttpOnly and SameSite, and is sent only over secure connections in production.</p>
+
+<h2>Third-party services</h2>
+<p>Some pages load content from other providers, which may set or read their own cookies under their own policies:</p>
+<ul>
+<li><strong>Maps:</strong> Google Maps, and map tiles or libraries from OpenStreetMap, Esri and unpkg, on project map pages.</li>
+<li><strong>Payments:</strong> Stripe, when you go to Stripe's checkout or billing pages.</li>
+</ul>
+
+<h2>Managing cookies</h2>
+<p>You can block or delete cookies in your browser settings. If you block the <code>session</code> cookie you will not be able to sign in or open shared projects.</p>
+{% endblock %}
