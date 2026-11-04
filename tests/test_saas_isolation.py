@@ -211,7 +211,10 @@ class TenantIsolationTests(unittest.TestCase):
 
     def test_expired_rate_limit_events_are_pruned_without_dropping_recent_attempts(self):
         previous_cleanup = portal._last_rate_limit_cleanup
-        portal._last_rate_limit_cleanup = 0
+        # Force the prune to be due regardless of host uptime. The throttle
+        # compares time.monotonic() (seconds since boot) against this sentinel,
+        # so a bare 0 only makes a prune due once the host has been up an hour.
+        portal._last_rate_limit_cleanup = time.monotonic() - 3601
         with portal.app.app_context():
             portal.db.session.add(portal.RateLimitEvent(
                 route="login", subject_hash="expired-rate-limit-fixture",
