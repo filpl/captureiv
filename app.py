@@ -953,6 +953,8 @@ def legal_details():
         "privacy_version": PRIVACY_NOTICE_VERSION,
         "billing_version": BILLING_TERMS_VERSION,
         "pages": LEGAL_PAGES,
+        "basic_monthly_price": f"USD {BASIC_MONTHLY_PRICE_CENTS / 100:,.2f}",
+        "basic_annual_price": f"USD {BASIC_ANNUAL_PRICE_CENTS / 100:,.2f}",
     }
 
 
