@@ -1711,6 +1711,29 @@ def send_project_access_code_email(access, recipients, code, *, previous_message
     return last_message_id
 
 
+def send_share_invites(access, emails):
+    """Email newly allow-listed clients an invitation with the project link and
+    keyword. Opted-out addresses are skipped. Returns the number sent."""
+    origin = app.config.get("PUBLIC_APP_URL", "").rstrip("/") or "https://app.captureiv.com"
+    link = f"{origin}/share/{access.share_token}"
+    how = ("Enter your email and the keyword below, then confirm with the one-time code we email you"
+           + (", or continue with Google." if google_oauth_enabled() else "."))
+    sent = 0
+    for email in emails:
+        if email_opted_out(email):
+            continue
+        body = (f"You've been given access to the {access.project} project on Capture IV.\n\n"
+                f"Open the project viewer:\n{link}\n\n"
+                f"Access keyword: {access.access_keyword}\n\n"
+                f"{how}")
+        try:
+            if send_account_email(email, f"You've been invited to {access.project} on Capture IV", body):
+                sent += 1
+        except Exception:
+            app.logger.exception("Share invite email failed")
+    return sent
+
+
 def parse_datetime(value):
     if not value:
         return None
@@ -4746,13 +4769,20 @@ def create_project_access():
     access.allow_overview = False
     access.allow_media = True
     access.allow_documents = False
+    previous_emails = set(share_allow_list(access))
     access.client_emails = ",".join(recipients)
     access.access_keyword = keyword
     db.session.commit()
     audit("project_access", "project", project, "Configured a viewer share keyword and email allow-list")
+    new_emails = [r for r in recipients if r.strip().lower() not in previous_emails]
+    invited = send_share_invites(access, new_emails) if new_emails else 0
     if recipients:
-        flash(f"Viewer access updated for {project}. Visitors enter the keyword, then a one-time code "
-              f"sent to one of the {len(recipients)} allow-listed email address(es).", "success")
+        note = (f" Visitors enter the keyword, then a one-time code sent to one of the "
+                f"{len(recipients)} allow-listed email(s).")
+        if new_emails:
+            note += (f" Invitation emailed to {invited} new client(s)." if invited
+                     else " New clients will be emailed an invitation once SMTP is configured.")
+        flash(f"Viewer access updated for {project}." + note, "success")
     else:
         flash(f"Viewer access updated for {project}. Add allow-listed emails to restrict who can open it.", "success")
     return redirect(url_for("admin") + "#project-access")

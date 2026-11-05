@@ -630,6 +630,37 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIn("Opt out here", account_sent[0].get_content())
         self.assertTrue(account_sent[0]["List-Unsubscribe"])
 
+    def test_sharing_emails_new_clients_an_invite_with_link_and_keyword(self):
+        sent = []
+
+        class FakeSMTP:
+            def __init__(self, *a, **k): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def starttls(self): pass
+            def login(self, *a): pass
+            def send_message(self, m): sent.append(m)
+
+        client = portal.app.test_client()
+        with client.session_transaction() as s:
+            s["_user_id"] = str(self.user_a_id); s["_fresh"] = True; s["_csrf"] = "t"
+        with patch.dict(portal.os.environ, {"SMTP_HOST": "smtp.example.test"}), \
+                patch.object(portal.smtplib, "SMTP", FakeSMTP):
+            resp = client.post("/admin/projects/access", data={"_csrf": "t", "project": "A project",
+                "access_keyword": "HarborKey", "client_emails": "brandnew@example.test", "allow_media": "on"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual([m["To"] for m in sent], ["brandnew@example.test"])
+        body = sent[0].get_content()
+        self.assertIn("HarborKey", body)
+        self.assertIn("/share/", body)
+        # Re-saving with the same allow-list does not re-invite the existing client.
+        sent.clear()
+        with patch.dict(portal.os.environ, {"SMTP_HOST": "smtp.example.test"}), \
+                patch.object(portal.smtplib, "SMTP", FakeSMTP):
+            client.post("/admin/projects/access", data={"_csrf": "t", "project": "A project",
+                "access_keyword": "HarborKey2", "client_emails": "brandnew@example.test", "allow_media": "on"})
+        self.assertEqual(sent, [])
+
     def test_project_assigned_employee_can_manage_shares_only_for_their_projects(self):
         client = portal.app.test_client()
         with client.session_transaction() as state:
