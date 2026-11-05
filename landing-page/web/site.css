@@ -431,3 +431,9 @@ h1 em,.hero h1 em{color:#1f7bff !important}
 .platform-route circle{fill:#1f7bff !important}
 .platform-date-pin,.platform-photo-pin{border-color:#4a8bff !important}
 .platform-date-pin:hover,.platform-date-pin:focus-visible{border-color:#1f7bff !important;box-shadow:0 0 0 4px #1f7bff44,0 9px 25px #12242b66 !important}
+.service-index,.feature-number,.step>span,.solution-row>span{color:#1f7bff !important}
+.solution-row>span{border-color:#bcd6ff !important;background:linear-gradient(145deg,#eaf2ff,#dbe8ff) !important}
+.package-enterprise{border-color:#1f7bff !important}
+.package-enterprise .eyebrow{color:#7fb0ff !important}
+.package-enterprise li::marker{color:#4a9bff !important}
+.product-quotes figure:before{color:#7fb0ff !important}
