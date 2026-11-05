@@ -578,6 +578,58 @@ class TenantIsolationTests(unittest.TestCase):
         with patch.object(portal, "google_oauth_enabled", return_value=True):
             self.assertEqual(portal.app.test_client().get("/share/google/callback?state=x&code=abc").status_code, 400)
 
+    def test_email_unsubscribe_opts_out_and_recurring_email_respects_it(self):
+        with portal.app.app_context():
+            token = portal._email_optout_token("client@harborstreet.com")
+        client = portal.app.test_client()
+        with client.session_transaction() as s:
+            s["_csrf"] = "t"
+        # GET shows a confirmation page and does NOT opt out yet (avoids scanner clicks).
+        self.assertEqual(client.get(f"/email/unsubscribe/{token}").status_code, 200)
+        with portal.app.app_context():
+            self.assertFalse(portal.email_opted_out("client@harborstreet.com"))
+        # POST records the opt-out; a tampered token is rejected.
+        self.assertEqual(client.post(f"/email/unsubscribe/{token}", data={"_csrf": "t"}).status_code, 200)
+        self.assertEqual(client.get("/email/unsubscribe/6465.bad").status_code, 404)
+        with portal.app.app_context():
+            self.assertTrue(portal.email_opted_out("client@harborstreet.com"))
+
+        sent = []
+
+        class FakeSMTP:
+            def __init__(self, *a, **k): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def starttls(self): pass
+            def login(self, *a): pass
+            def send_message(self, m): sent.append(m)
+
+        class FakeAccess:
+            project = "A project"
+            share_token = "tok-optout"
+
+        with portal.app.app_context(), \
+                patch.dict(portal.os.environ, {"SMTP_HOST": "smtp.example.test"}), \
+                patch.object(portal.smtplib, "SMTP", FakeSMTP):
+            portal.send_project_access_code_email(
+                FakeAccess(), ["client@harborstreet.com", "pm@harborstreet.com"], "WXYZ")
+        # The opted-out recipient is skipped; the other gets an unsubscribe option.
+        self.assertEqual([m["To"] for m in sent], ["pm@harborstreet.com"])
+        self.assertIn("Opt out here", sent[0].get_content())
+        self.assertTrue(sent[0]["List-Unsubscribe"])
+        # Account email also carries the footer + header, per recipient.
+        account_sent = []
+
+        class FakeSMTP2(FakeSMTP):
+            def send_message(self, m): account_sent.append(m)
+
+        with portal.app.app_context(), \
+                patch.dict(portal.os.environ, {"SMTP_HOST": "smtp.example.test"}), \
+                patch.object(portal.smtplib, "SMTP", FakeSMTP2):
+            self.assertTrue(portal.send_account_email("new@example.test", "Verify", "Confirm your email."))
+        self.assertIn("Opt out here", account_sent[0].get_content())
+        self.assertTrue(account_sent[0]["List-Unsubscribe"])
+
     def test_project_assigned_employee_can_manage_shares_only_for_their_projects(self):
         client = portal.app.test_client()
         with client.session_transaction() as state:

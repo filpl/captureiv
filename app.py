@@ -232,6 +232,7 @@ PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
 WALKTHROUGH_SCHEMA_REVISION = "0020_site_walkthrough_service"
 WALKTHROUGH_CAPTURE_SCHEMA_REVISION = "0021_walkthrough_field_capture"
 SHARE_KEYWORD_SCHEMA_REVISION = "0022_share_keyword_email_gate"
+EMAIL_OPTOUT_SCHEMA_REVISION = "0023_email_opt_out"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 BASIC_PROJECT_LIMIT = 1
@@ -665,6 +666,13 @@ class ShareAccessOtp(db.Model):
     expires_at = db.Column(db.DateTime, nullable=False)
     attempts = db.Column(db.Integer, nullable=False, default=0)
     used_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=now_utc)
+
+
+class EmailOptOut(db.Model):
+    """Addresses that opted out of non-essential Capture IV email."""
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(254), unique=True, nullable=False, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=now_utc)
 
 
@@ -1618,6 +1626,40 @@ def _google_verified_email(code, redirect_uri):
     return email if email and info.get("email_verified") else None
 
 
+def _email_optout_token(email):
+    normalized = (email or "").strip().lower().encode()
+    sig = hmac.new(app.config["SECRET_KEY"].encode(), normalized, hashlib.sha256).hexdigest()[:32]
+    return normalized.hex() + "." + sig
+
+
+def _email_from_optout_token(token):
+    try:
+        hex_email, sig = token.rsplit(".", 1)
+        email = bytes.fromhex(hex_email).decode().strip().lower()
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not email:
+        return None
+    expected = hmac.new(app.config["SECRET_KEY"].encode(), email.encode(), hashlib.sha256).hexdigest()[:32]
+    return email if hmac.compare_digest(sig, expected) else None
+
+
+def email_opted_out(email):
+    return bool(email) and EmailOptOut.query.filter_by(email=email.strip().lower()).first() is not None
+
+
+def email_unsubscribe_url(email):
+    base = (app.config.get("PUBLIC_APP_URL") or "https://app.captureiv.com").rstrip("/")
+    return f"{base}/email/unsubscribe/{_email_optout_token(email)}"
+
+
+def email_footer(recipient):
+    support = os.environ.get("LEGAL_CONTACT_EMAIL", "").strip() or "support@captureiv.com"
+    return ("\n\n-- \nCapture IV · " + support + "\n"
+            "Don't want non-essential email from Capture IV? Opt out here: "
+            + email_unsubscribe_url(recipient))
+
+
 def normalize_client_emails(value):
     recipients = []
     for entry in re.split(r"[\s,;]+", str(value or "").strip()):
@@ -1635,34 +1677,38 @@ def normalize_client_emails(value):
 
 def send_project_access_code_email(access, recipients, code, *, previous_message_id=""):
     """Send the new project code as a threaded message to configured recipients."""
+    recipients = [r for r in (recipients or []) if not email_opted_out(r)]
     if not recipients:
         return None
     host = os.environ.get("SMTP_HOST", "").strip()
     if not host:
         return None
     origin = app.config.get("PUBLIC_APP_URL", "").rstrip("/") or "https://app.captureiv.com"
-    message = EmailMessage()
-    message["Subject"] = f"Weekly project access code — {access.project}"
-    message["From"] = os.environ.get("MAIL_FROM", "Capture IV <no-reply@captureiv.com>")
-    message["To"] = "undisclosed-recipients:;"
-    message["Bcc"] = ", ".join(recipients)
-    message["Message-ID"] = make_msgid(domain="captureiv.com")
-    if previous_message_id:
-        message["In-Reply-To"] = previous_message_id
-        message["References"] = previous_message_id
-    message.set_content(
-        f"Your weekly access code for {access.project} is {code}.\n\n"
-        f"Open the project link and enter this code: {origin}/share/{access.share_token}\n\n"
-        "This code changes weekly. This message is part of your existing project-access email thread. "
-        "If you did not expect this message, contact your project administrator."
-    )
+    body = (f"Your weekly access code for {access.project} is {code}.\n\n"
+            f"Open the project link and enter this code: {origin}/share/{access.share_token}\n\n"
+            "This code changes weekly. If you did not expect this message, contact your project administrator.")
+    last_message_id = ""
     with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587")), timeout=15) as server:
         server.starttls()
         username, password = os.environ.get("SMTP_USERNAME", ""), os.environ.get("SMTP_PASSWORD", "")
         if username:
             server.login(username, password)
-        server.send_message(message)
-    return message["Message-ID"]
+        # Send one message per recipient (private) so each gets its own
+        # one-click unsubscribe link.
+        for recipient in recipients:
+            message = EmailMessage()
+            message["Subject"] = f"Weekly project access code — {access.project}"
+            message["From"] = os.environ.get("MAIL_FROM", "Capture IV <no-reply@captureiv.com>")
+            message["To"] = recipient
+            message["Message-ID"] = make_msgid(domain="captureiv.com")
+            message["List-Unsubscribe"] = f"<{email_unsubscribe_url(recipient)}>"
+            if previous_message_id:
+                message["In-Reply-To"] = previous_message_id
+                message["References"] = previous_message_id
+            message.set_content(body + email_footer(recipient))
+            server.send_message(message)
+            last_message_id = message["Message-ID"]
+    return last_message_id
 
 
 def parse_datetime(value):
@@ -1736,7 +1782,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=PROJECT_CODE_EMAIL_SCHEMA_REVISION),
                             SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION),
                             SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION),
-                            SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION)])
+                            SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION),
+                            SchemaMigration(revision=EMAIL_OPTOUT_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1758,6 +1805,7 @@ def migrate_sqlite():
         apply_site_boundary_name_migration()
         apply_project_code_email_migration()
         apply_share_keyword_migration()
+        apply_email_optout_migration()
         apply_walkthrough_migration()
         apply_walkthrough_capture_migration()
         return
@@ -1867,6 +1915,7 @@ def migrate_sqlite():
     apply_site_boundary_name_migration()
     apply_project_code_email_migration()
     apply_share_keyword_migration()
+    apply_email_optout_migration()
     apply_walkthrough_migration()
     apply_walkthrough_capture_migration()
 
@@ -2133,6 +2182,15 @@ def apply_share_keyword_migration():
     db.session.commit()
 
 
+def apply_email_optout_migration():
+    """Create the email opt-out table used for unsubscribe handling."""
+    if db.session.get(SchemaMigration, EMAIL_OPTOUT_SCHEMA_REVISION):
+        return
+    db.create_all()  # creates email_opt_out if it does not exist yet
+    db.session.add(SchemaMigration(revision=EMAIL_OPTOUT_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_project_code_email_migration():
     """Persist client code recipients and weekly email threading state."""
     if db.session.get(SchemaMigration, PROJECT_CODE_EMAIL_SCHEMA_REVISION):
@@ -2383,6 +2441,20 @@ def share_google_callback():
     return redirect(url_for("shared_project", token=token))
 
 
+@app.route("/email/unsubscribe/<token>", methods=["GET", "POST"])
+def email_unsubscribe(token):
+    """Let any email recipient opt out of non-essential Capture IV email."""
+    email = _email_from_optout_token(token)
+    if not email:
+        abort(404)
+    done = EmailOptOut.query.filter_by(email=email).first() is not None
+    if request.method == "POST" and not done:
+        db.session.add(EmailOptOut(email=email))
+        db.session.commit()
+        done = True
+    return render_template("unsubscribe.html", email=email, done=done)
+
+
 @app.get("/project/<code>")
 def project_view(code):
     """Legacy URLs no longer grant access by themselves; send them through code entry."""
@@ -2556,7 +2628,8 @@ def send_account_email(recipient, subject, body):
     message["Subject"] = subject
     message["From"] = os.environ.get("MAIL_FROM", "Capture IV <no-reply@captureiv.com>")
     message["To"] = recipient
-    message.set_content(body)
+    message["List-Unsubscribe"] = f"<{email_unsubscribe_url(recipient)}>"
+    message.set_content(body + email_footer(recipient))
     port = int(os.environ.get("SMTP_PORT", "587"))
     with smtplib.SMTP(host, port, timeout=15) as server:
         server.starttls()
