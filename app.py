@@ -2350,10 +2350,17 @@ def shared_project(token):
                                google_enabled=google_enabled, locked=locked)
 
     if request.method == "POST" and not already_in:
+        submitted = request.form.get("code", "").strip()
+        if "@" in submitted:
+            # A project admin or team member typed their account email instead of a
+            # client access code — route them straight to the team sign-in. Access
+            # codes never contain "@", so this can't swallow a real code, it works
+            # even when the link is locked, and it redirects on any email shape (not
+            # only known accounts) so the gate never reveals which emails have logins.
+            return redirect(url_for("login"))
         if locked:
             flash("This link is locked after too many incorrect codes. Ask the project team for a new link.", "error")
             return _gate()
-        submitted = request.form.get("code", "").strip()
         if (submitted and expected_code
                 and secrets.compare_digest(submitted.casefold(), expected_code.casefold())):
             if access.code_attempts:

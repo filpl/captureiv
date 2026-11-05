@@ -546,6 +546,50 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIn(b'name="code"', body)
         self.assertNotIn(b"Continue with Google", body)
 
+    def test_team_email_at_the_share_gate_redirects_to_sign_in(self):
+        with portal.app.app_context():
+            access = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).first()
+            if not access:
+                access = portal.ProjectAccess(project="A project", code="EML1", company_id=1)
+                portal.db.session.add(access)
+            access.allow_media = True
+            access.access_keyword = "HarborPass"
+            access.client_emails = ""
+            access.code_attempts = 0
+            access.revoked_at = None
+            access.expires_at = None
+            portal.db.session.commit()
+            token = access.share_token
+        client = portal.app.test_client()
+        with client.session_transaction() as s:
+            s["_csrf"] = "t"
+        # The gate shows one consolidated "Project team sign in", not a separate top link.
+        gate = client.get(f"/share/{token}")
+        self.assertIn(b"Project team sign in", gate.data)
+        self.assertNotIn(b"access-login", gate.data)
+        # The email hint shows on the live /share gate (where the redirect works) but
+        # not on the bare "/" homepage (4-letter box, no email routing).
+        self.assertIn(b"access-team-hint", gate.data)
+        self.assertNotIn(b"access-team-hint", client.get("/").data)
+        # Typing an account email (not a client code) routes a team member to sign-in
+        # and never counts as a failed code attempt.
+        resp = client.post(f"/share/{token}", data={"_csrf": "t", "code": "tenant-a@example.test"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/login", resp.headers["Location"])
+        self.assertNotIn(b"PROJECT MEDIA", client.get(f"/share/{token}").data)
+        with portal.app.app_context():
+            self.assertEqual(portal.ProjectAccess.query.filter_by(share_token=token).one().code_attempts, 0)
+        # Even after the link locks on bad codes, an email still reaches sign-in.
+        with portal.app.app_context():
+            locked = portal.ProjectAccess.query.filter_by(share_token=token).one()
+            locked.code_attempts = 5
+            portal.db.session.commit()
+        after_lock = client.post(f"/share/{token}", data={"_csrf": "t", "code": "lead@company.test"})
+        self.assertEqual(after_lock.status_code, 302)
+        self.assertIn("/login", after_lock.headers["Location"])
+        # The locked gate has no code box, so the "enter your email above" hint is hidden.
+        self.assertNotIn(b"access-team-hint", client.get(f"/share/{token}").data)
+
     def test_google_sign_in_grants_access_only_to_allow_listed_accounts(self):
         with portal.app.app_context():
             # Reuse the shared "A project" access row (unique per company) so the
