@@ -390,7 +390,7 @@ html{scroll-padding-top:88px}body{background:var(--paper);color:var(--ink);backg
 
 /* ===== Capture IV brand lock: white nav, C-mark logo, blue accents (match live site) ===== */
 :root{--blue:#1f7bff}
-.nav{background:#fffffff2 !important;border-bottom:1px solid #e6e9ef !important;box-shadow:0 1px 0 #eef1f5 !important;backdrop-filter:blur(14px) saturate(130%) !important;-webkit-backdrop-filter:blur(14px) saturate(130%) !important}
+.nav{background:#ffffff !important;border-bottom:1px solid #e9ecf1 !important;box-shadow:0 1px 0 #eff2f6 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important}
 .nav-links a{color:#3b4654 !important;border-bottom-color:transparent}
 .nav-links a:hover{color:#0b1530 !important}
 .nav-links a[aria-current=page]{color:#0b1530 !important;border-bottom:2px solid #1f7bff !important}
