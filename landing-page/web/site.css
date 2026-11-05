@@ -427,3 +427,7 @@ h1 em,.hero h1 em{color:#1f7bff !important}
 :root{--teal:#1f7bff}
 .float-top span:first-child{color:#7fb0ff !important}
 .support-link:hover{color:#1f7bff !important}
+.platform-route path{stroke:#1f7bff !important}
+.platform-route circle{fill:#1f7bff !important}
+.platform-date-pin,.platform-photo-pin{border-color:#4a8bff !important}
+.platform-date-pin:hover,.platform-date-pin:focus-visible{border-color:#1f7bff !important;box-shadow:0 0 0 4px #1f7bff44,0 9px 25px #12242b66 !important}
