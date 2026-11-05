@@ -383,3 +383,6 @@ html{scroll-padding-top:88px}body{background:var(--paper);color:var(--ink);backg
 .capture-archive-head{display:flex;align-items:baseline;gap:8px 16px;flex-wrap:wrap;margin:0 0 16px}
 .capture-archive-head .capture-kicker{flex:none}
 .capture-archive-head p{margin:0;color:#526873;font-size:15px;line-height:1.6;max-width:660px}
+.capture-archive--mini{max-width:860px;margin-left:auto;margin-right:auto}
+.capture-archive--mini .capture-archive-head{justify-content:center;text-align:center;margin-bottom:12px}
+.capture-archive--mini .capture-archive-head p{font-size:14px;max-width:560px}
