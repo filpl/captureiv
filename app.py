@@ -1564,37 +1564,11 @@ def viewer_access_active(access):
                 and (not access.expires_at or access.expires_at > now_utc()))
 
 
-SHARE_EMAIL_RE = r"[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+"
-
-
 def share_allow_list(access):
-    """Lower-cased allow-list of emails permitted to open an email-restricted share."""
+    """Lower-cased allow-list of emails permitted to open a share with Google."""
     if not access or not access.client_emails:
         return []
     return [e.strip().lower() for e in access.client_emails.replace("\n", ",").split(",") if e.strip()]
-
-
-def issue_share_access_otp(access, email):
-    """Create, store (hashed) and send a 6-digit one-time code for a share.
-    Returns (code, delivered). Previous unused codes for the same email are
-    invalidated so only the newest works. In non-production the raw code is
-    returned to the caller when delivery is unavailable, so the flow stays
-    testable without SMTP; production always relies on email delivery."""
-    code = f"{secrets.randbelow(1000000):06d}"
-    ShareAccessOtp.query.filter_by(access_id=access.id, email=email, used_at=None).update(
-        {"used_at": now_utc()}, synchronize_session=False)
-    db.session.add(ShareAccessOtp(access_id=access.id, email=email,
-        code_hash=hashlib.sha256(code.encode()).hexdigest(),
-        expires_at=now_utc() + timedelta(minutes=15)))
-    db.session.commit()
-    delivered = False
-    try:
-        delivered = send_account_email(email, f"Your access code for {access.project}",
-            f"Your one-time code to open {access.project} is {code}.\n\n"
-            "It expires in 15 minutes. If you did not request access, ignore this message.")
-    except Exception:
-        app.logger.exception("Share access code email failed")
-    return code, delivered
 
 
 def google_oauth_enabled():
@@ -1716,18 +1690,19 @@ def send_project_access_code_email(access, recipients, code, *, previous_message
 
 def send_share_invites(access, emails):
     """Email newly allow-listed clients an invitation with the project link and
-    keyword. Opted-out addresses are skipped. Returns the number sent."""
+    access code. Opted-out addresses are skipped. Returns the number sent."""
     origin = app.config.get("PUBLIC_APP_URL", "").rstrip("/") or "https://app.captureiv.com"
     link = f"{origin}/share/{access.share_token}"
-    how = ("Enter your email and the keyword below, then confirm with the one-time code we email you"
-           + (", or continue with Google." if google_oauth_enabled() else "."))
+    how = ("Open the link and enter the access code below"
+           + (", or continue with Google using this email address." if google_oauth_enabled()
+              else "."))
     sent = 0
     for email in emails:
         if email_opted_out(email):
             continue
         body = (f"You've been given access to the {access.project} project on Capture IV.\n\n"
                 f"Open the project viewer:\n{link}\n\n"
-                f"Access keyword: {access.access_keyword}\n\n"
+                f"Access code: {access.access_keyword}\n\n"
                 f"{how}")
         try:
             if send_account_email(email, f"You've been invited to {access.project} on Capture IV", body):
@@ -2358,98 +2333,45 @@ def shared_project(token):
         abort(404)
     already_in = (session.get("viewer_token") == access.share_token
                   and session.get("viewer_code") == access.code)
-    code_mode = access.access_mode == "code"
-    keyword_gate = (not code_mode) and bool(access.access_keyword)
-    allow_list = [] if code_mode else share_allow_list(access)
+    allow_list = share_allow_list(access)
+    # Every share offers the same two ways in: the access code the admin set
+    # (link + code), and — when configured and the share has an allow-list —
+    # "Continue with Google" for an approved address.
+    google_enabled = google_oauth_enabled() and bool(allow_list)
     next_tab = request.values.get("next_tab") or request.args.get("tab", "map")
-    locked = code_mode and (access.code_attempts or 0) >= 5
+    locked = (access.code_attempts or 0) >= 5
+    # The admin-set access code; fall back to the legacy 4-letter code so old
+    # links keep working until they are reissued.
+    expected_code = access.access_keyword or access.code
 
-    def _gate(step="request", email="", dev_code="", tries_left=None):
+    def _gate():
         return render_template("access.html", share_token=token, next_tab=next_tab,
-                               project_name=access.project, keyword_gate=keyword_gate,
-                               email_gate=bool(allow_list), step=step, prefill_email=email,
-                               dev_code=dev_code, google_enabled=google_oauth_enabled(),
-                               code_gate=code_mode, locked=locked, tries_left=tries_left)
+                               project_name=access.project, code_gate=True,
+                               google_enabled=google_enabled, locked=locked)
 
     if request.method == "POST" and not already_in:
-        if code_mode:
-            if locked:
-                flash("This link is locked after too many incorrect codes. Ask the project team for a new link.", "error")
-                return _gate()
-            submitted = request.form.get("code", "").strip()
-            if submitted and secrets.compare_digest(submitted.casefold(), access.access_keyword.casefold()):
-                if access.code_attempts:
-                    access.code_attempts = 0
-                    db.session.commit()
-                session["viewer_code"] = access.code
-                session["viewer_token"] = access.share_token
-                return redirect(url_for("shared_project", token=token, tab=next_tab))
-            access.code_attempts = (access.code_attempts or 0) + 1
-            db.session.commit()
-            remaining = max(0, 5 - access.code_attempts)
-            locked = remaining == 0
-            if remaining:
-                flash(f"That code was not recognized. {remaining} tr{'y' if remaining == 1 else 'ies'} left "
-                      "before this link locks.", "error")
-            else:
-                flash("This link is now locked after too many incorrect codes. Ask the project team for a new link.", "error")
-            return _gate(tries_left=remaining)
-        if keyword_gate:
-            if request.form.get("step") == "verify":
-                pending = session.get("share_pending") or {}
-                submitted = re.sub(r"\D", "", request.form.get("otp", ""))[:6]
-                otp = None
-                if pending.get("access_id") == access.id and pending.get("email") and len(submitted) == 6:
-                    otp = (ShareAccessOtp.query.filter_by(access_id=access.id, email=pending["email"], used_at=None)
-                           .order_by(ShareAccessOtp.id.desc()).first())
-                if (otp and otp.expires_at > now_utc() and otp.attempts < 6
-                        and secrets.compare_digest(hashlib.sha256(submitted.encode()).hexdigest(), otp.code_hash)):
-                    otp.used_at = now_utc()
-                    db.session.commit()
-                    session["viewer_code"] = access.code
-                    session["viewer_token"] = access.share_token
-                    session["viewer_email"] = pending["email"]
-                    session.pop("share_pending", None)
-                    return redirect(url_for("shared_project", token=token, tab=next_tab))
-                if otp:
-                    otp.attempts += 1
-                    db.session.commit()
-                flash("That code is incorrect or has expired. Request a new one.", "error")
-                return _gate(step="verify", email=pending.get("email", ""))
-            # First step: validate the keyword (plus an allow-listed email when
-            # the share restricts access to specific addresses).
-            email = request.form.get("email", "").strip().lower()[:254]
-            keyword = request.form.get("keyword", "").strip()
-            keyword_ok = bool(keyword) and secrets.compare_digest(keyword.casefold(), access.access_keyword.casefold())
-            if not allow_list:
-                # Keyword-only share: no email verification step.
-                if keyword_ok:
-                    session["viewer_code"] = access.code
-                    session["viewer_token"] = access.share_token
-                    return redirect(url_for("shared_project", token=token, tab=next_tab))
-                flash("That keyword was not recognized. Check it and try again.", "error")
-                return _gate()
-            email_ok = bool(re.fullmatch(SHARE_EMAIL_RE, email)) and email in allow_list
-            dev_code = ""
-            if email_ok and keyword_ok:
-                code, delivered = issue_share_access_otp(access, email)
-                session["share_pending"] = {"access_id": access.id, "email": email}
-                if not delivered and os.environ.get("APP_ENV", "development") != "production":
-                    dev_code = code
-            else:
-                session.pop("share_pending", None)
-            # Uniform response regardless of validity, so the gate cannot be used
-            # to probe which emails are allow-listed.
-            flash("If that email is authorized and the keyword is correct, we've sent a 6-digit code to the address.", "success")
-            return _gate(step="verify", email=email, dev_code=dev_code)
-        # Legacy 4-letter-code shares (no keyword configured).
-        submitted = re.sub(r"[^A-Z]", "", request.form.get("code", "").upper())[:4]
-        if len(submitted) != 4 or not secrets.compare_digest(submitted, access.code):
-            flash("That project code was not recognized. Check the four letters and try again.", "error")
+        if locked:
+            flash("This link is locked after too many incorrect codes. Ask the project team for a new link.", "error")
             return _gate()
-        session["viewer_code"] = access.code
-        session["viewer_token"] = access.share_token
-        return redirect(url_for("shared_project", token=token, tab=next_tab))
+        submitted = request.form.get("code", "").strip()
+        if (submitted and expected_code
+                and secrets.compare_digest(submitted.casefold(), expected_code.casefold())):
+            if access.code_attempts:
+                access.code_attempts = 0
+                db.session.commit()
+            session["viewer_code"] = access.code
+            session["viewer_token"] = access.share_token
+            return redirect(url_for("shared_project", token=token, tab=next_tab))
+        access.code_attempts = (access.code_attempts or 0) + 1
+        db.session.commit()
+        remaining = max(0, 5 - access.code_attempts)
+        locked = remaining == 0
+        if remaining:
+            flash(f"That code was not recognized. {remaining} tr{'y' if remaining == 1 else 'ies'} left "
+                  "before this link locks.", "error")
+        else:
+            flash("This link is now locked after too many incorrect codes. Ask the project team for a new link.", "error")
+        return _gate()
 
     if not already_in:
         return _gate()
@@ -2499,13 +2421,13 @@ def share_google_callback():
     if not viewer_access_active(access):
         abort(404)
     if request.args.get("error") or not request.args.get("code"):
-        flash("Google sign-in was cancelled. Use the keyword, or try again.", "error")
+        flash("Google sign-in was cancelled. Use the access code, or try again.", "error")
         return redirect(url_for("shared_project", token=token))
     try:
         email = _google_verified_email(request.args["code"], absolute_app_url("share_google_callback"))
     except Exception:
         app.logger.exception("Google share sign-in failed")
-        flash("Could not complete Google sign-in. Use the keyword, or try again.", "error")
+        flash("Could not complete Google sign-in. Use the access code, or try again.", "error")
         return redirect(url_for("shared_project", token=token))
     if email and email in share_allow_list(access):
         session["viewer_code"] = access.code
@@ -4783,10 +4705,9 @@ def create_project_access():
         abort(400, "Project is required")
     if not user_can_upload_project(project):
         abort(403)
-    mode = "code" if request.form.get("access_mode") == "code" else "email"
-    keyword = request.form.get("access_keyword", "").strip()[:80]
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{3,79}", keyword):
-        flash(f"Enter a {'code' if mode == 'code' else 'keyword'} of 4-80 characters "
+    code_value = request.form.get("access_keyword", "").strip()[:80]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{3,79}", code_value):
+        flash("Enter an access code of 4-80 characters "
               "(letters, numbers, spaces, hyphens or underscores).", "error")
         return redirect(url_for("admin") + "#project-access")
     if not project_capacity_available(project):
@@ -4803,7 +4724,6 @@ def create_project_access():
         flash(str(exc), "error")
         return redirect(url_for("admin") + "#project-access")
     access = ProjectAccess.query.filter_by(project=project).first()
-    previous_message_id = access.code_email_message_id if access else ""
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
     for _ in range(100):
         code = "".join(secrets.choice(alphabet) for _ in range(4))
@@ -4818,37 +4738,35 @@ def create_project_access():
     else:
         access = ProjectAccess(project=project, code=code, share_token=secrets.token_urlsafe(32))
         db.session.add(access)
-    if mode == "code":
-        recipients = []  # link+code shares are not restricted to an email allow-list
-        if not expiration_date:
-            expiration_date = (now_utc() + timedelta(days=14)).date()
+    # Every share is a unique link + code that expires; default to 14 days when
+    # the admin leaves the date blank.
+    if not expiration_date:
+        expiration_date = (now_utc() + timedelta(days=14)).date()
     access.expires_at = datetime.combine(expiration_date, datetime.max.time()) if expiration_date else None
     access.revoked_at = None
     access.allow_overview = False
     access.allow_media = True
     access.allow_documents = False
-    access.access_mode = mode
+    access.access_mode = "code"
     access.code_attempts = 0
     previous_emails = set(share_allow_list(access))
     access.client_emails = ",".join(recipients)
-    access.access_keyword = keyword
+    access.access_keyword = code_value
     db.session.commit()
-    audit("project_access", "project", project, f"Configured a {mode}-mode viewer share")
-    if mode == "code":
-        flash(f"Link + code access created for {project}. Share the link and code; the link locks after "
-              "5 wrong codes and expires on the chosen date. Re-save here any time to issue a fresh link.", "success")
-        return redirect(url_for("admin") + "#project-access")
+    audit("project_access", "project", project, "Configured a viewer share link")
     new_emails = [r for r in recipients if r.strip().lower() not in previous_emails]
     invited = send_share_invites(access, new_emails) if new_emails else 0
+    note = (f" The link locks after 5 wrong codes and expires on {expiration_date:%b %-d, %Y}.")
     if recipients:
-        note = (f" Visitors enter the keyword, then a one-time code sent to one of the "
-                f"{len(recipients)} allow-listed email(s).")
         if new_emails:
             note += (f" Invitation emailed to {invited} new client(s)." if invited
                      else " New clients will be emailed an invitation once SMTP is configured.")
-        flash(f"Viewer access updated for {project}." + note, "success")
-    else:
-        flash(f"Viewer access updated for {project}. Add allow-listed emails to restrict who can open it.", "success")
+        if google_oauth_enabled():
+            note += f" The {len(recipients)} allow-listed email(s) can also continue with Google."
+        else:
+            note += f" {len(recipients)} email(s) are allow-listed for Google sign-in."
+    flash(f"Link + code access created for {project}." + note +
+          " Re-save here any time to issue a fresh link and code.", "success")
     return redirect(url_for("admin") + "#project-access")
 
 

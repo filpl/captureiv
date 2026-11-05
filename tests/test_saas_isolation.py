@@ -440,7 +440,7 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIn(f"/share/{token}", legacy.headers["Location"])
         challenge = client.get(legacy.headers["Location"])
         self.assertEqual(challenge.status_code, 200)
-        self.assertIn(b"4-letter code", challenge.data)
+        self.assertIn(b"Enter the access code", challenge.data)
         self.assertNotIn(b"B  B  B  B", challenge.data)
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', challenge.data).group(1).decode()
         denied = client.post(f"/share/{token}?tab=media", data={"_csrf": csrf, "code": "ABCD", "next_tab": "media"})
@@ -482,8 +482,8 @@ class TenantIsolationTests(unittest.TestCase):
         challenge = client.get(f"/share/{token}")
         self.assertEqual(challenge.status_code, 200)
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', challenge.data).group(1).decode()
-        unlocked = client.post(f"/share/{token}", data={"_csrf": csrf, "step": "request",
-                                                        "keyword": "HARBORVIEW", "next_tab": "map"})
+        unlocked = client.post(f"/share/{token}", data={"_csrf": csrf,
+                                                        "code": "HARBORVIEW", "next_tab": "map"})
         self.assertEqual(unlocked.status_code, 302)
         media_redirect = client.get(unlocked.headers["Location"])
         self.assertEqual(media_redirect.status_code, 200)
@@ -497,48 +497,54 @@ class TenantIsolationTests(unittest.TestCase):
             self.assertIsNotNone(portal.db.session.get(portal.ProjectAccess, access_id).revoked_at)
         self.assertEqual(client.get(f"/project/{access_code}").status_code, 404)
 
-    def test_email_restricted_share_needs_allow_listed_email_keyword_and_one_time_code(self):
+    def test_share_gate_offers_both_access_code_and_google(self):
+        # Every share gate shows the two ways in the admin kept: an access-code
+        # box (link + code) and "Continue with Google" for an allow-listed email.
         with portal.app.app_context():
-            access = portal.ProjectAccess(project="A project", code="EML1", company_id=1,
-                allow_media=True, access_keyword="HarborPass", client_emails="allowed@example.test")
-            portal.db.session.add(access); portal.db.session.commit()
-            token, access_id = access.share_token, access.id
+            access = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).first()
+            if not access:
+                access = portal.ProjectAccess(project="A project", code="EML1", company_id=1)
+                portal.db.session.add(access)
+            access.allow_media = True
+            access.access_keyword = "HarborPass"
+            access.client_emails = "allowed@example.test"
+            access.access_mode = "code"
+            access.code_attempts = 0
+            access.revoked_at = None
+            access.expires_at = None
+            portal.db.session.commit()
+            token = access.share_token
         client = portal.app.test_client()
         with client.session_transaction() as state:
             state["_csrf"] = "t"
-        self.assertEqual(client.get(f"/share/{token}").status_code, 200)
-
-        def request_code(email, keyword):
-            with patch.object(portal, "send_account_email", return_value=False):
-                return client.post(f"/share/{token}", data={"_csrf": "t", "step": "request", "email": email,
-                                                             "keyword": keyword, "next_tab": "map"})
-
-        # A non-allow-listed email, or the wrong keyword, must never mint a code.
-        request_code("intruder@example.test", "HarborPass")
-        request_code("allowed@example.test", "WrongWord")
+        # Google configured + an allow-list present => the gate shows BOTH options,
+        # and never the removed email/keyword fields.
+        with patch.object(portal, "google_oauth_enabled", return_value=True):
+            gate = client.get(f"/share/{token}")
+        self.assertEqual(gate.status_code, 200)
+        self.assertIn(b'name="code"', gate.data)
+        self.assertIn(b"Continue with Google", gate.data)
+        self.assertNotIn(b'name="email"', gate.data)
+        self.assertNotIn(b'name="keyword"', gate.data)
+        # A wrong code never opens the viewer; the correct code (case-insensitive) does.
+        self.assertEqual(client.post(f"/share/{token}", data={"_csrf": "t", "code": "nope"}).status_code, 200)
+        self.assertNotIn(b"PROJECT MEDIA", client.get(f"/share/{token}").data)
+        ok = client.post(f"/share/{token}", data={"_csrf": "t", "code": "harborpass", "next_tab": "map"})
+        self.assertEqual(ok.status_code, 302)
+        self.assertEqual(client.get(ok.headers["Location"]).status_code, 200)
+        # No allow-list => the Google button is hidden even when Google is configured.
         with portal.app.app_context():
-            self.assertEqual(portal.ShareAccessOtp.query.filter_by(access_id=access_id).count(), 0)
-
-        # Allow-listed email + correct keyword (case-insensitive) issues one code.
-        issued = request_code("allowed@example.test", "harborpass")
-        self.assertEqual(issued.status_code, 200)
-        code = re.search(rb"one-time code is <strong>(\d{6})</strong>", issued.data).group(1).decode()
-        with portal.app.app_context():
-            self.assertEqual(portal.ShareAccessOtp.query.filter_by(access_id=access_id).count(), 1)
-
-        # A wrong code is rejected; the correct code unlocks the viewer once.
-        self.assertEqual(client.post(f"/share/{token}", data={"_csrf": "t", "step": "verify", "otp": "000000"}).status_code, 200)
-        unlocked = client.post(f"/share/{token}", data={"_csrf": "t", "step": "verify", "otp": code, "next_tab": "map"})
-        self.assertEqual(unlocked.status_code, 302)
-        self.assertEqual(client.get(unlocked.headers["Location"]).status_code, 200)
-        with portal.app.app_context():
-            self.assertIsNotNone(portal.ShareAccessOtp.query.filter_by(access_id=access_id).one().used_at)
-        # The one-time code cannot be replayed from a fresh session.
-        fresh = portal.app.test_client()
-        with fresh.session_transaction() as state:
-            state["_csrf"] = "t"
-        self.assertEqual(fresh.post(f"/share/{token}", data={"_csrf": "t", "step": "verify", "otp": code}).status_code, 200)
-        self.assertNotIn(b"PROJECT MEDIA", fresh.get(f"/share/{token}").data)
+            solo = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).one()
+            solo.client_emails = ""
+            portal.db.session.commit()
+            token2 = solo.share_token
+        plain = portal.app.test_client()
+        with plain.session_transaction() as s:
+            s["_csrf"] = "t"
+        with patch.object(portal, "google_oauth_enabled", return_value=True):
+            body = plain.get(f"/share/{token2}").data
+        self.assertIn(b'name="code"', body)
+        self.assertNotIn(b"Continue with Google", body)
 
     def test_google_sign_in_grants_access_only_to_allow_listed_accounts(self):
         with portal.app.app_context():
@@ -630,7 +636,7 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIn("Opt out here", account_sent[0].get_content())
         self.assertTrue(account_sent[0]["List-Unsubscribe"])
 
-    def test_sharing_emails_new_clients_an_invite_with_link_and_keyword(self):
+    def test_sharing_emails_new_clients_an_invite_with_link_and_code(self):
         sent = []
 
         class FakeSMTP:
