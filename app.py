@@ -2271,6 +2271,7 @@ def render_project_view(access):
                                 tab=("map" if "map" in permissions else sorted(permissions)[0])))
     return render_template("project_view.html", project=access.project, code=access.code, share_token=token,
                            flights=flights, day_flights=day_flights, dates=dates, docs=docs,
+                           media_areas=sorted({f.area for f in flights if f.area}),
                            selected_date=selected_date, selected_flight=selected_flight, tab=tab,
                            permissions=permissions,
                            site_map=site_map, photo_reference=photo_reference, site_reference=site_reference,

@@ -629,3 +629,8 @@ body.viewer-page{height:100vh;height:100dvh;min-height:0;overflow:hidden;backgro
 .viewer-topnav .viewer-search{border-color:#d7dfe3;background:#f4f7f8;color:#4a5962}
 .viewer-topnav .viewer-search input{color:#162b36}
 .viewer-topnav .viewer-search input::placeholder{color:#8a99a2}
+/* Media tab: Area filter tabs (Building One, etc.) */
+.media-area-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
+.media-area-tab{border:1px solid #d7dee2;background:#fff;color:#4a5962;border-radius:20px;padding:7px 15px;font:600 12px 'DM Sans',sans-serif;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}
+.media-area-tab:hover{border-color:#1769d2;color:#1769d2}
+.media-area-tab.active{background:#1769d2;border-color:#1769d2;color:#fff}

@@ -188,3 +188,9 @@ body.is-capturing .wt-plan{cursor:crosshair}
 @media (max-width:520px){#wt-share,#wt-settings{display:none}.wt-top-actions .wt-btn{font-size:12px}.wt-top{row-gap:6px}}
 
 @media (max-width:860px){.wt-edit-bar{left:56px;right:56px;transform:none;flex-wrap:wrap;border-radius:12px;justify-content:center;font-size:12px}}
+/* Animate routes + markers drawing in when a walk first opens */
+.wt-animate-in .wt-path{stroke-dasharray:1;stroke-dashoffset:1;animation:wt-draw .9s cubic-bezier(.4,0,.2,1) forwards}
+.wt-animate-in .wt-marker{opacity:0;animation:wt-pop .45s ease forwards .35s}
+@keyframes wt-draw{to{stroke-dashoffset:0}}
+@keyframes wt-pop{to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.wt-animate-in .wt-path,.wt-animate-in .wt-marker{animation:none;opacity:.92}}

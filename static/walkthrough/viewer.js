@@ -260,7 +260,7 @@ function drawOverlay() {
   for (const s of visibleSessions()) {
     const pts = s.points;
     if (state.showPaths && pts.length > 1) {
-      overlay.append(svg('polyline', { class: 'wt-path', points: pts.map((p) => `${p.x * W},${p.y * H}`).join(' '),
+      overlay.append(svg('polyline', { class: 'wt-path', pathLength: 1, points: pts.map((p) => `${p.x * W},${p.y * H}`).join(' '),
         stroke: s.color, 'data-w': state.pathWidth + (s.id === state.editSessionId && state.edit ? 1 : 0) }));
     }
     if (!state.showMarkers) continue;
@@ -278,6 +278,11 @@ function drawOverlay() {
     }
   }
   sizeMarkers();
+  if (!overlay.dataset.entered && overlay.querySelector('.wt-path, .wt-marker')) {
+    overlay.dataset.entered = '1';
+    overlay.classList.add('wt-animate-in');
+    setTimeout(() => overlay.classList.remove('wt-animate-in'), 1500);
+  }
 }
 function sizeMarkers() {
   const k = 1 / state.view.s;
