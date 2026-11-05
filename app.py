@@ -2252,23 +2252,27 @@ def render_project_view(access):
     flight_path_data = flight_paths_by_date.get(selected_date.isoformat(), [])
     selected_id = request.args.get("flight", type=int)
     selected_flight = next((f for f in day_flights if f.id == selected_id), None) or (day_flights[0] if day_flights else None)
-    tab = request.args.get("tab", "media")
-    # Client access permits viewing and downloading assigned media and site maps.
-    # It never grants document, account, billing, or editing access.
+    tab = request.args.get("tab", "map")
+    # Client access gates each view. The Flight Scans map and the Media grid both
+    # surface footage, so both require allow_media; Overview/timeline require
+    # allow_overview; Documents require allow_documents and the documents feature.
+    # It never grants account, billing, or editing access.
     permissions = set()
     if access.allow_media:
-        permissions.add("media")
-        if company_feature_enabled("site_maps", access.company_id):
-            permissions.add("map")
-        if company_feature_enabled("photos", access.company_id):
-            permissions.add("photos")
+        permissions.update({"map", "media"})
+    if access.allow_overview:
+        permissions.update({"overview", "timeline"})
+    if access.allow_documents and company_feature_enabled("documents", access.company_id):
+        permissions.add("documents")
     if tab not in permissions:
         if not permissions:
             abort(403)
-        return redirect(url_for("shared_project", token=token, tab="media"))
+        return redirect(url_for("shared_project", token=token,
+                                tab=("map" if "map" in permissions else sorted(permissions)[0])))
     return render_template("project_view.html", project=access.project, code=access.code, share_token=token,
                            flights=flights, day_flights=day_flights, dates=dates, docs=docs,
                            selected_date=selected_date, selected_flight=selected_flight, tab=tab,
+                           permissions=permissions,
                            site_map=site_map, photo_reference=photo_reference, site_reference=site_reference,
                            map_pins=map_pins, map_pin_data=map_pin_data, photo_pin_data=photo_pin_data,
                            photo_area_data=photo_area_data,

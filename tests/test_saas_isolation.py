@@ -661,12 +661,10 @@ class TenantIsolationTests(unittest.TestCase):
         if page.status_code == 302:
             page = viewer.get(page.headers["Location"])
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Map", page.data)
-        self.assertIn(b"Photos", page.data)
-        photo_page = viewer.get(f"/share/{token}?tab=photos")
-        self.assertEqual(photo_page.status_code, 200)
-        self.assertIn(b"North facade", photo_page.data)
-        self.assertIn(b"/files/pinned-photo-one.jpg", photo_page.data)
+        self.assertIn(b"Flight Scans", page.data)
+        # Pinned site photos now render as map pins (the separate Photos tab was retired).
+        self.assertIn(b"North facade", page.data)
+        self.assertIn(b"/files/pinned-photo-one.jpg", page.data)
         self.assertEqual(viewer.get(f"/share/{token}?tab=map").status_code, 200)
         photo_file = viewer.get("/files/pinned-photo-one.jpg")
         self.assertEqual(photo_file.status_code, 200)
@@ -738,10 +736,8 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(unlocked.status_code, 302)
         viewer_page = visitor.get(unlocked.headers["Location"])
         self.assertEqual(viewer_page.status_code, 200)
-        self.assertIn(b"Drone footage", viewer_page.data)
+        self.assertIn(b"Flight Scans", viewer_page.data)
         self.assertNotIn(b"Documents", viewer_page.data)
-        self.assertIn(b"Map", viewer_page.data)
-        self.assertIn(b"Photos", viewer_page.data)
 
         with portal.app.app_context():
             portal.db.session.add(portal.ProjectFile(company_id=company_id,
