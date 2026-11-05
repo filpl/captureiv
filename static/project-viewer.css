@@ -618,3 +618,14 @@ body.viewer-page{height:100vh;height:100dvh;min-height:0;overflow:hidden;backgro
 .calendar-day.selected{border-color:#3b82f6;background:#3b82f6;color:#fff;font-weight:700}
 .calendar-note{margin:9px 1px 0;padding-top:8px;border-top:1px solid #edf0f4;color:#8190a1;font-size:9px}
 @media(max-width:760px){.viewer-date-rail{padding:8px 10px;overflow:visible}.flight-date-calendar{position:relative;top:auto;left:auto;width:100%;margin-top:8px;box-shadow:0 8px 22px #10243b16}}
+.viewer-topnav-label{text-decoration:none}
+/* Light viewer top bar, to match the marketing-site logo treatment */
+.viewer-topnav{background:#ffffff;border-bottom:1px solid #e4e9ec;color:#162b36;box-shadow:0 1px 0 #eef2f4}
+.viewer-topnav-label .civ-logo{color:#0b1530}
+.viewer-topnav-label>span:not(.civ-logo){color:#5c6f7a}
+.viewer-topnav-tabs a{color:#5f7079}
+.viewer-topnav-tabs a:hover,.viewer-topnav-tabs a.active{color:#142733}
+.viewer-topnav-tabs a.active:after{background:#1769d2}
+.viewer-topnav .viewer-search{border-color:#d7dfe3;background:#f4f7f8;color:#4a5962}
+.viewer-topnav .viewer-search input{color:#162b36}
+.viewer-topnav .viewer-search input::placeholder{color:#8a99a2}
