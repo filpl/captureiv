@@ -620,7 +620,7 @@ body.viewer-page{height:100vh;height:100dvh;min-height:0;overflow:hidden;backgro
 @media(max-width:760px){.viewer-date-rail{padding:8px 10px;overflow:visible}.flight-date-calendar{position:relative;top:auto;left:auto;width:100%;margin-top:8px;box-shadow:0 8px 22px #10243b16}}
 .viewer-topnav-label{text-decoration:none}
 /* Light viewer top bar, to match the marketing-site logo treatment */
-.viewer-topnav{background:#ffffff;border-bottom:1px solid #e4e9ec;color:#162b36;box-shadow:0 1px 0 #eef2f4}
+.viewer-topnav{background:#e8ebee;border-bottom:1px solid #d3d8dd;color:#162b36;box-shadow:0 1px 0 #dde1e5}
 .viewer-topnav-label .civ-logo{color:#0b1530}
 .viewer-topnav-label>span:not(.civ-logo){color:#5c6f7a}
 .viewer-topnav-tabs a{color:#5f7079}
