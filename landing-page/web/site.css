@@ -377,3 +377,9 @@ html{scroll-padding-top:88px}body{background:var(--paper);color:var(--ink);backg
 .capture-shot{margin:0;overflow:hidden;border:1px solid #c9d8db;border-radius:16px;background:#0e1f27;box-shadow:0 22px 60px #15313b1f}
 .capture-shot img{display:block;width:100%;height:auto}
 @media(max-width:860px){.capture-row,.capture-row.reverse{grid-template-columns:1fr;gap:24px}.capture-row .capture-copy{order:-1}}
+/* Drone section: secondary paragraph + end-of-section flight archive strip */
+.capture-copy>p+p{margin:-6px 0 20px;font-size:14px;color:#526873;line-height:1.6}
+.capture-archive{margin-top:clamp(30px,4vw,48px)}
+.capture-archive-head{display:flex;align-items:baseline;gap:8px 16px;flex-wrap:wrap;margin:0 0 16px}
+.capture-archive-head .capture-kicker{flex:none}
+.capture-archive-head p{margin:0;color:#526873;font-size:15px;line-height:1.6;max-width:660px}
