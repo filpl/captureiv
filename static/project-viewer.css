@@ -620,13 +620,13 @@ body.viewer-page{height:100vh;height:100dvh;min-height:0;overflow:hidden;backgro
 @media(max-width:760px){.viewer-date-rail{padding:8px 10px;overflow:visible}.flight-date-calendar{position:relative;top:auto;left:auto;width:100%;margin-top:8px;box-shadow:0 8px 22px #10243b16}}
 .viewer-topnav-label{text-decoration:none}
 /* Light viewer top bar, to match the marketing-site logo treatment */
-.viewer-topnav{background:#e8ebee;border-bottom:1px solid #d3d8dd;color:#162b36;box-shadow:0 1px 0 #dde1e5}
+.viewer-topnav{background:#d4dae1;border-bottom:1px solid #c0c8d0;color:#162b36;box-shadow:0 1px 0 #c9d0d7}
 .viewer-topnav-label .civ-logo{color:#0b1530}
 .viewer-topnav-label>span:not(.civ-logo){color:#5c6f7a}
 .viewer-topnav-tabs a{color:#5f7079}
 .viewer-topnav-tabs a:hover,.viewer-topnav-tabs a.active{color:#142733}
 .viewer-topnav-tabs a.active:after{background:#1769d2}
-.viewer-topnav .viewer-search{border-color:#d7dfe3;background:#f4f7f8;color:#4a5962}
+.viewer-topnav .viewer-search{border-color:#c6ced5;background:#e7ebef;color:#4a5962}
 .viewer-topnav .viewer-search input{color:#162b36}
 .viewer-topnav .viewer-search input::placeholder{color:#8a99a2}
 /* Media tab: Area filter tabs (Building One, etc.) */
