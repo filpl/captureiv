@@ -231,6 +231,7 @@ SITE_BOUNDARY_NAME_SCHEMA_REVISION = "0019_project_site_boundary_name"
 PROJECT_CODE_EMAIL_SCHEMA_REVISION = "0018_project_code_email_schedule"
 WALKTHROUGH_SCHEMA_REVISION = "0020_site_walkthrough_service"
 WALKTHROUGH_CAPTURE_SCHEMA_REVISION = "0021_walkthrough_field_capture"
+SHARE_KEYWORD_SCHEMA_REVISION = "0022_share_keyword_email_gate"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 BASIC_PROJECT_LIMIT = 1
@@ -296,6 +297,7 @@ class ProjectAccess(db.Model):
     allow_media = db.Column(db.Boolean, nullable=False, default=False)
     allow_documents = db.Column(db.Boolean, nullable=False, default=False)
     client_emails = db.Column(db.Text, nullable=False, default="")
+    access_keyword = db.Column(db.String(80), nullable=False, default="")
     code_email_message_id = db.Column(db.String(255), nullable=False, default="")
     last_code_email_at = db.Column(db.DateTime, nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)
@@ -651,6 +653,19 @@ class UploadTransfer(db.Model):
         db.Index("ix_upload_transfer_company_status_expiry", "company_id", "status", "expires_at"),
         db.Index("ix_upload_transfer_user_fingerprint", "user_id", "fingerprint"),
     )
+
+
+class ShareAccessOtp(db.Model):
+    """One-time email codes that confirm a visitor owns an allow-listed address
+    for an email-restricted project share. Public-viewer data (not tenant-scoped)."""
+    id = db.Column(db.Integer, primary_key=True)
+    access_id = db.Column(db.Integer, db.ForeignKey("project_access.id"), nullable=False, index=True)
+    email = db.Column(db.String(254), nullable=False, index=True)
+    code_hash = db.Column(db.String(64), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    used_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=now_utc)
 
 
 class StorageReservation(db.Model):
@@ -1538,6 +1553,39 @@ def viewer_access_active(access):
                 and (not access.expires_at or access.expires_at > now_utc()))
 
 
+SHARE_EMAIL_RE = r"[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+"
+
+
+def share_allow_list(access):
+    """Lower-cased allow-list of emails permitted to open an email-restricted share."""
+    if not access or not access.client_emails:
+        return []
+    return [e.strip().lower() for e in access.client_emails.replace("\n", ",").split(",") if e.strip()]
+
+
+def issue_share_access_otp(access, email):
+    """Create, store (hashed) and send a 6-digit one-time code for a share.
+    Returns (code, delivered). Previous unused codes for the same email are
+    invalidated so only the newest works. In non-production the raw code is
+    returned to the caller when delivery is unavailable, so the flow stays
+    testable without SMTP; production always relies on email delivery."""
+    code = f"{secrets.randbelow(1000000):06d}"
+    ShareAccessOtp.query.filter_by(access_id=access.id, email=email, used_at=None).update(
+        {"used_at": now_utc()}, synchronize_session=False)
+    db.session.add(ShareAccessOtp(access_id=access.id, email=email,
+        code_hash=hashlib.sha256(code.encode()).hexdigest(),
+        expires_at=now_utc() + timedelta(minutes=15)))
+    db.session.commit()
+    delivered = False
+    try:
+        delivered = send_account_email(email, f"Your access code for {access.project}",
+            f"Your one-time code to open {access.project} is {code}.\n\n"
+            "It expires in 15 minutes. If you did not request access, ignore this message.")
+    except Exception:
+        app.logger.exception("Share access code email failed")
+    return code, delivered
+
+
 def normalize_client_emails(value):
     recipients = []
     for entry in re.split(r"[\s,;]+", str(value or "").strip()):
@@ -1655,7 +1703,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=SITE_BOUNDARY_SCHEMA_REVISION),
                             SchemaMigration(revision=PROJECT_CODE_EMAIL_SCHEMA_REVISION),
                             SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION),
-                            SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION)])
+                            SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION),
+                            SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1676,6 +1725,7 @@ def migrate_sqlite():
         apply_site_boundary_migration()
         apply_site_boundary_name_migration()
         apply_project_code_email_migration()
+        apply_share_keyword_migration()
         apply_walkthrough_migration()
         apply_walkthrough_capture_migration()
         return
@@ -1704,6 +1754,7 @@ def migrate_sqlite():
         "project_access": {"company_id": "INTEGER", "allow_overview": bool_false,
                            "allow_media": bool_false, "allow_documents": bool_false,
                            "client_emails": "TEXT NOT NULL DEFAULT ''",
+                           "access_keyword": "VARCHAR(80) NOT NULL DEFAULT ''",
                            "code_email_message_id": "VARCHAR(255) NOT NULL DEFAULT ''",
                            "last_code_email_at": timestamp_type},
         "project_site_map": {"company_id": "INTEGER", "file_size": "BIGINT NOT NULL DEFAULT 0"},
@@ -1783,6 +1834,7 @@ def migrate_sqlite():
     apply_site_boundary_migration()
     apply_site_boundary_name_migration()
     apply_project_code_email_migration()
+    apply_share_keyword_migration()
     apply_walkthrough_migration()
     apply_walkthrough_capture_migration()
 
@@ -2032,6 +2084,23 @@ def apply_site_boundary_name_migration():
         db.session.commit()
 
 
+def apply_share_keyword_migration():
+    """Add the custom share keyword column and the one-time-code table for
+    email-restricted project shares."""
+    if db.session.get(SchemaMigration, SHARE_KEYWORD_SCHEMA_REVISION):
+        return
+    tables = set(inspect(db.engine).get_table_names())
+    if "project_access" in tables:
+        columns = {column["name"] for column in inspect(db.engine).get_columns("project_access")}
+        if "access_keyword" not in columns:
+            db.session.execute(text(
+                'ALTER TABLE "project_access" ADD COLUMN "access_keyword" VARCHAR(80) NOT NULL DEFAULT \'\''
+            ))
+    db.create_all()  # creates share_access_otp if it does not exist yet
+    db.session.add(SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_project_code_email_migration():
     """Persist client code recipients and weekly email threading state."""
     if db.session.get(SchemaMigration, PROJECT_CODE_EMAIL_SCHEMA_REVISION):
@@ -2147,19 +2216,78 @@ def shared_project(token):
     walkthrough_viewer = bool(access.allow_media and company_service_enabled("walkthrough", access.company_id))
     if not drone_viewer and not walkthrough_viewer:
         abort(404)
-    if request.method == "POST":
+    already_in = (session.get("viewer_token") == access.share_token
+                  and session.get("viewer_code") == access.code)
+    keyword_gate = bool(access.access_keyword)
+    allow_list = share_allow_list(access)
+    next_tab = request.values.get("next_tab") or request.args.get("tab", "map")
+
+    def _gate(step="request", email="", dev_code=""):
+        return render_template("access.html", share_token=token, next_tab=next_tab,
+                               project_name=access.project, keyword_gate=keyword_gate,
+                               email_gate=bool(allow_list), step=step, prefill_email=email,
+                               dev_code=dev_code)
+
+    if request.method == "POST" and not already_in:
+        if keyword_gate:
+            if request.form.get("step") == "verify":
+                pending = session.get("share_pending") or {}
+                submitted = re.sub(r"\D", "", request.form.get("otp", ""))[:6]
+                otp = None
+                if pending.get("access_id") == access.id and pending.get("email") and len(submitted) == 6:
+                    otp = (ShareAccessOtp.query.filter_by(access_id=access.id, email=pending["email"], used_at=None)
+                           .order_by(ShareAccessOtp.id.desc()).first())
+                if (otp and otp.expires_at > now_utc() and otp.attempts < 6
+                        and secrets.compare_digest(hashlib.sha256(submitted.encode()).hexdigest(), otp.code_hash)):
+                    otp.used_at = now_utc()
+                    db.session.commit()
+                    session["viewer_code"] = access.code
+                    session["viewer_token"] = access.share_token
+                    session["viewer_email"] = pending["email"]
+                    session.pop("share_pending", None)
+                    return redirect(url_for("shared_project", token=token, tab=next_tab))
+                if otp:
+                    otp.attempts += 1
+                    db.session.commit()
+                flash("That code is incorrect or has expired. Request a new one.", "error")
+                return _gate(step="verify", email=pending.get("email", ""))
+            # First step: validate the keyword (plus an allow-listed email when
+            # the share restricts access to specific addresses).
+            email = request.form.get("email", "").strip().lower()[:254]
+            keyword = request.form.get("keyword", "").strip()
+            keyword_ok = bool(keyword) and secrets.compare_digest(keyword.casefold(), access.access_keyword.casefold())
+            if not allow_list:
+                # Keyword-only share: no email verification step.
+                if keyword_ok:
+                    session["viewer_code"] = access.code
+                    session["viewer_token"] = access.share_token
+                    return redirect(url_for("shared_project", token=token, tab=next_tab))
+                flash("That keyword was not recognized. Check it and try again.", "error")
+                return _gate()
+            email_ok = bool(re.fullmatch(SHARE_EMAIL_RE, email)) and email in allow_list
+            dev_code = ""
+            if email_ok and keyword_ok:
+                code, delivered = issue_share_access_otp(access, email)
+                session["share_pending"] = {"access_id": access.id, "email": email}
+                if not delivered and os.environ.get("APP_ENV", "development") != "production":
+                    dev_code = code
+            else:
+                session.pop("share_pending", None)
+            # Uniform response regardless of validity, so the gate cannot be used
+            # to probe which emails are allow-listed.
+            flash("If that email is authorized and the keyword is correct, we've sent a 6-digit code to the address.", "success")
+            return _gate(step="verify", email=email, dev_code=dev_code)
+        # Legacy 4-letter-code shares (no keyword configured).
         submitted = re.sub(r"[^A-Z]", "", request.form.get("code", "").upper())[:4]
         if len(submitted) != 4 or not secrets.compare_digest(submitted, access.code):
             flash("That project code was not recognized. Check the four letters and try again.", "error")
-            return render_template("access.html", share_token=token,
-                                   next_tab=request.form.get("next_tab", "map"), project_name=access.project)
+            return _gate()
         session["viewer_code"] = access.code
         session["viewer_token"] = access.share_token
-        return redirect(url_for("shared_project", token=token,
-                                tab=request.form.get("next_tab", "map")))
-    if session.get("viewer_code") != access.code or session.get("viewer_token") != access.share_token:
-        return render_template("access.html", share_token=token,
-                               next_tab=request.args.get("tab", "map"), project_name=access.project)
+        return redirect(url_for("shared_project", token=token, tab=next_tab))
+
+    if not already_in:
+        return _gate()
     if walkthrough_viewer and (not drone_viewer or request.args.get("tab") == "walkthrough"):
         return redirect(url_for("walkthrough.shared", token=token))
     return render_project_view(access)
@@ -4409,12 +4537,18 @@ def upload_photo_pin_images():
 
 
 @app.post("/admin/projects/access")
-@admin_required
+@upload_user_required
 @company_feature_required("viewer_links")
 def create_project_access():
     project = request.form.get("project", "").strip()[:160]
     if not project:
         abort(400, "Project is required")
+    if not user_can_upload_project(project):
+        abort(403)
+    keyword = request.form.get("access_keyword", "").strip()[:80]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{3,79}", keyword):
+        flash("Enter a share keyword of 4-80 characters (letters, numbers, spaces, hyphens or underscores).", "error")
+        return redirect(url_for("admin") + "#project-access")
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
         return redirect(url_for("admin"))
@@ -4450,23 +4584,14 @@ def create_project_access():
     access.allow_media = True
     access.allow_documents = False
     access.client_emails = ",".join(recipients)
-    if recipients:
-        try:
-            db.session.flush()
-            message_id = send_project_access_code_email(access, recipients, code,
-                                                        previous_message_id=previous_message_id)
-            if not message_id:
-                raise RuntimeError("Email is not configured, so the access code was not changed. Configure SMTP first.")
-            access.code_email_message_id = message_id
-            access.last_code_email_at = now_utc()
-        except Exception as exc:
-            db.session.rollback()
-            app.logger.exception("Could not send project access code email")
-            flash(f"Access code was not changed because its email could not be sent: {exc}", "error")
-            return redirect(url_for("admin") + "#project-access")
+    access.access_keyword = keyword
     db.session.commit()
-    audit("project_access", "project", project, "Generated or rotated a four-character viewer code")
-    flash(f"Viewer access updated for {project}." + (" Code emailed to the saved client addresses." if recipients else " Add client email addresses to enable weekly code emails."), "success")
+    audit("project_access", "project", project, "Configured a viewer share keyword and email allow-list")
+    if recipients:
+        flash(f"Viewer access updated for {project}. Visitors enter the keyword, then a one-time code "
+              f"sent to one of the {len(recipients)} allow-listed email address(es).", "success")
+    else:
+        flash(f"Viewer access updated for {project}. Add allow-listed emails to restrict who can open it.", "success")
     return redirect(url_for("admin") + "#project-access")
 
 

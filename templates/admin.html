@@ -31,12 +31,13 @@
   {% if features.viewer_links %}
   <section class="console-section project-access-panel" id="project-access">
     <div class="section-head"><div><h2>Client access</h2>
-      <p class="muted">Each project gets a share link and a four-letter code. Clients get a read-only view{% if client_sees %} of {{ client_sees|join(', ') }}{% endif %} — never documents or editing.</p></div></div>
+      <p class="muted">Each project gets a share link protected by a keyword, and you can restrict access to specific emails that each confirm a one-time code. Clients get a read-only view{% if client_sees %} of {{ client_sees|join(', ') }}{% endif %} — never documents or editing.</p></div></div>
     <details class="subtle-card new-viewer-project"{% if not project_names %} open{% endif %}><summary>＋ New project and client code</summary>
       <form method="post" action="{{ url_for('create_project_access') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <div class="field-grid">
           <label for="new-viewer-project-name">Project name<input id="new-viewer-project-name" name="project" maxlength="160" placeholder="e.g. Harbor Street Offices" required></label>
-          <label>Client emails for weekly codes (optional)<input type="text" name="client_emails" autocomplete="off" placeholder="client@example.com, another@example.com"><span class="field-hint">Emailed only after SMTP is configured.</span></label>
+          <label>Access keyword<input type="text" name="access_keyword" maxlength="80" autocomplete="off" placeholder="e.g. HarborStreet25" required><span class="field-hint">Visitors type this to open the share.</span></label>
+          <label>Allowed viewer emails (optional)<input type="text" name="client_emails" autocomplete="off" placeholder="client@example.com, another@example.com"><span class="field-hint">Listed addresses must confirm a one-time code we email them. Leave blank for keyword-only access.</span></label>
           <label>Code expires on (optional)<input type="date" name="expires_on"></label>
         </div>
         <button class="button primary small">Create project and code</button>
@@ -57,7 +58,8 @@
         <details{% if not access %} open{% endif %}><summary>{% if live %}Code settings &amp; renewal{% else %}Create a client code{% endif %}</summary>
           <form method="post" action="{{ url_for('create_project_access') }}" class="subtle-card"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="project" value="{{ project_name }}">
             <div class="field-grid">
-              <label class="viewer-expiry">Client emails for weekly codes<input type="text" name="client_emails" autocomplete="off" value="{{ access.client_emails if access else '' }}" placeholder="client@example.com, another@example.com"><span class="field-hint">Emailed only after SMTP is configured.</span></label>
+              <label class="viewer-expiry">Access keyword<input type="text" name="access_keyword" maxlength="80" autocomplete="off" value="{{ access.access_keyword if access else '' }}" placeholder="e.g. HarborStreet25" required></label>
+              <label class="viewer-expiry">Allowed viewer emails<input type="text" name="client_emails" autocomplete="off" value="{{ access.client_emails if access else '' }}" placeholder="client@example.com, another@example.com"><span class="field-hint">Restricts access; each confirms an emailed one-time code. Blank = keyword only.</span></label>
               <label class="viewer-expiry">Code expires<input type="date" name="expires_on" value="{{ access.expires_at.strftime('%Y-%m-%d') if access and access.expires_at else '' }}"></label>
             </div>
             <div class="form-actions">

@@ -467,7 +467,7 @@ class TenantIsolationTests(unittest.TestCase):
         expiration = (portal.now_utc() + portal.timedelta(days=1)).date().isoformat()
         response = client.post("/admin/projects/access", data={
             "_csrf": csrf, "project": "A project", "expires_on": expiration,
-            "allow_media": "on",
+            "allow_media": "on", "access_keyword": "HARBORVIEW",
         })
         self.assertEqual(response.status_code, 302)
         with portal.app.app_context():
@@ -482,7 +482,8 @@ class TenantIsolationTests(unittest.TestCase):
         challenge = client.get(f"/share/{token}")
         self.assertEqual(challenge.status_code, 200)
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', challenge.data).group(1).decode()
-        unlocked = client.post(f"/share/{token}", data={"_csrf": csrf, "code": access_code, "next_tab": "map"})
+        unlocked = client.post(f"/share/{token}", data={"_csrf": csrf, "step": "request",
+                                                        "keyword": "HARBORVIEW", "next_tab": "map"})
         self.assertEqual(unlocked.status_code, 302)
         media_redirect = client.get(unlocked.headers["Location"])
         self.assertEqual(media_redirect.status_code, 200)
@@ -495,6 +496,64 @@ class TenantIsolationTests(unittest.TestCase):
         with portal.app.app_context():
             self.assertIsNotNone(portal.db.session.get(portal.ProjectAccess, access_id).revoked_at)
         self.assertEqual(client.get(f"/project/{access_code}").status_code, 404)
+
+    def test_email_restricted_share_needs_allow_listed_email_keyword_and_one_time_code(self):
+        with portal.app.app_context():
+            access = portal.ProjectAccess(project="A project", code="EML1", company_id=1,
+                allow_media=True, access_keyword="HarborPass", client_emails="allowed@example.test")
+            portal.db.session.add(access); portal.db.session.commit()
+            token, access_id = access.share_token, access.id
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state["_csrf"] = "t"
+        self.assertEqual(client.get(f"/share/{token}").status_code, 200)
+
+        def request_code(email, keyword):
+            with patch.object(portal, "send_account_email", return_value=False):
+                return client.post(f"/share/{token}", data={"_csrf": "t", "step": "request", "email": email,
+                                                             "keyword": keyword, "next_tab": "map"})
+
+        # A non-allow-listed email, or the wrong keyword, must never mint a code.
+        request_code("intruder@example.test", "HarborPass")
+        request_code("allowed@example.test", "WrongWord")
+        with portal.app.app_context():
+            self.assertEqual(portal.ShareAccessOtp.query.filter_by(access_id=access_id).count(), 0)
+
+        # Allow-listed email + correct keyword (case-insensitive) issues one code.
+        issued = request_code("allowed@example.test", "harborpass")
+        self.assertEqual(issued.status_code, 200)
+        code = re.search(rb"one-time code is <strong>(\d{6})</strong>", issued.data).group(1).decode()
+        with portal.app.app_context():
+            self.assertEqual(portal.ShareAccessOtp.query.filter_by(access_id=access_id).count(), 1)
+
+        # A wrong code is rejected; the correct code unlocks the viewer once.
+        self.assertEqual(client.post(f"/share/{token}", data={"_csrf": "t", "step": "verify", "otp": "000000"}).status_code, 200)
+        unlocked = client.post(f"/share/{token}", data={"_csrf": "t", "step": "verify", "otp": code, "next_tab": "map"})
+        self.assertEqual(unlocked.status_code, 302)
+        self.assertEqual(client.get(unlocked.headers["Location"]).status_code, 200)
+        with portal.app.app_context():
+            self.assertIsNotNone(portal.ShareAccessOtp.query.filter_by(access_id=access_id).one().used_at)
+        # The one-time code cannot be replayed from a fresh session.
+        fresh = portal.app.test_client()
+        with fresh.session_transaction() as state:
+            state["_csrf"] = "t"
+        self.assertEqual(fresh.post(f"/share/{token}", data={"_csrf": "t", "step": "verify", "otp": code}).status_code, 200)
+        self.assertNotIn(b"PROJECT MEDIA", fresh.get(f"/share/{token}").data)
+
+    def test_project_assigned_employee_can_manage_shares_only_for_their_projects(self):
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state["_user_id"] = str(self.employee_id); state["_fresh"] = True; state["_csrf"] = "t"
+        granted = client.post("/admin/projects/access", data={
+            "_csrf": "t", "project": "A project", "access_keyword": "TeamKey1", "allow_media": "on"})
+        self.assertEqual(granted.status_code, 302)
+        with portal.app.app_context():
+            self.assertEqual(portal.ProjectAccess.query.filter_by(
+                project="A project", company_id=1).one().access_keyword, "TeamKey1")
+        # The employee is not assigned to "Unassigned project", so it is refused.
+        denied = client.post("/admin/projects/access", data={
+            "_csrf": "t", "project": "Unassigned project", "access_keyword": "NopeKey1", "allow_media": "on"})
+        self.assertEqual(denied.status_code, 403)
 
     def test_employee_is_limited_to_assigned_projects(self):
         client = portal.app.test_client()
