@@ -661,6 +661,48 @@ class TenantIsolationTests(unittest.TestCase):
                 "access_keyword": "HarborKey2", "client_emails": "brandnew@example.test", "allow_media": "on"})
         self.assertEqual(sent, [])
 
+    def test_link_code_share_grants_with_code_and_locks_the_link_after_five_tries(self):
+        admin = portal.app.test_client()
+        with admin.session_transaction() as s:
+            s["_user_id"] = str(self.user_a_id); s["_fresh"] = True; s["_csrf"] = "t"
+        resp = admin.post("/admin/projects/access", data={"_csrf": "t", "project": "A project",
+            "access_mode": "code", "access_keyword": "OpenSesame", "allow_media": "on"})
+        self.assertEqual(resp.status_code, 302)
+        with portal.app.app_context():
+            access = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).one()
+            token = access.share_token
+            self.assertEqual(access.access_mode, "code")
+            self.assertIsNotNone(access.expires_at)  # link+code shares default to an expiry
+
+        v = portal.app.test_client()
+        with v.session_transaction() as s:
+            s["_csrf"] = "t"
+        gate = v.get(f"/share/{token}")
+        self.assertEqual(gate.status_code, 200)
+        self.assertIn(b'name="code"', gate.data)
+        self.assertNotIn(b'name="email"', gate.data)
+        # Five wrong codes lock the whole link.
+        for _ in range(5):
+            self.assertEqual(v.post(f"/share/{token}", data={"_csrf": "t", "code": "nope"}).status_code, 200)
+        # Even the correct code is now refused, and the viewer never renders.
+        self.assertEqual(v.post(f"/share/{token}", data={"_csrf": "t", "code": "OpenSesame"}).status_code, 200)
+        self.assertNotIn(b"PROJECT MEDIA", v.get(f"/share/{token}").data)
+        with portal.app.app_context():
+            self.assertGreaterEqual(portal.ProjectAccess.query.filter_by(share_token=token).one().code_attempts, 5)
+        # Re-saving reissues a fresh link and resets the counter; the code then works (case-insensitive).
+        admin.post("/admin/projects/access", data={"_csrf": "t", "project": "A project",
+            "access_mode": "code", "access_keyword": "OpenSesame", "allow_media": "on"})
+        with portal.app.app_context():
+            fresh = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).one()
+            token2 = fresh.share_token
+            self.assertEqual(fresh.code_attempts, 0)
+        v2 = portal.app.test_client()
+        with v2.session_transaction() as s:
+            s["_csrf"] = "t"
+        ok = v2.post(f"/share/{token2}", data={"_csrf": "t", "code": "opensesame", "next_tab": "map"})
+        self.assertEqual(ok.status_code, 302)
+        self.assertEqual(v2.get(f"/share/{token2}?tab=map").status_code, 200)
+
     def test_project_assigned_employee_can_manage_shares_only_for_their_projects(self):
         client = portal.app.test_client()
         with client.session_transaction() as state:

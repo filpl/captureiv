@@ -233,6 +233,7 @@ WALKTHROUGH_SCHEMA_REVISION = "0020_site_walkthrough_service"
 WALKTHROUGH_CAPTURE_SCHEMA_REVISION = "0021_walkthrough_field_capture"
 SHARE_KEYWORD_SCHEMA_REVISION = "0022_share_keyword_email_gate"
 EMAIL_OPTOUT_SCHEMA_REVISION = "0023_email_opt_out"
+SHARE_LINK_CODE_SCHEMA_REVISION = "0024_share_link_code_mode"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 BASIC_PROJECT_LIMIT = 1
@@ -299,6 +300,8 @@ class ProjectAccess(db.Model):
     allow_documents = db.Column(db.Boolean, nullable=False, default=False)
     client_emails = db.Column(db.Text, nullable=False, default="")
     access_keyword = db.Column(db.String(80), nullable=False, default="")
+    access_mode = db.Column(db.String(10), nullable=False, default="email")
+    code_attempts = db.Column(db.Integer, nullable=False, default=0)
     code_email_message_id = db.Column(db.String(255), nullable=False, default="")
     last_code_email_at = db.Column(db.DateTime, nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)
@@ -1806,7 +1809,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=WALKTHROUGH_SCHEMA_REVISION),
                             SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION),
                             SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION),
-                            SchemaMigration(revision=EMAIL_OPTOUT_SCHEMA_REVISION)])
+                            SchemaMigration(revision=EMAIL_OPTOUT_SCHEMA_REVISION),
+                            SchemaMigration(revision=SHARE_LINK_CODE_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1829,6 +1833,7 @@ def migrate_sqlite():
         apply_project_code_email_migration()
         apply_share_keyword_migration()
         apply_email_optout_migration()
+        apply_share_link_code_migration()
         apply_walkthrough_migration()
         apply_walkthrough_capture_migration()
         return
@@ -1858,6 +1863,8 @@ def migrate_sqlite():
                            "allow_media": bool_false, "allow_documents": bool_false,
                            "client_emails": "TEXT NOT NULL DEFAULT ''",
                            "access_keyword": "VARCHAR(80) NOT NULL DEFAULT ''",
+                           "access_mode": "VARCHAR(10) NOT NULL DEFAULT 'email'",
+                           "code_attempts": "INTEGER NOT NULL DEFAULT 0",
                            "code_email_message_id": "VARCHAR(255) NOT NULL DEFAULT ''",
                            "last_code_email_at": timestamp_type},
         "project_site_map": {"company_id": "INTEGER", "file_size": "BIGINT NOT NULL DEFAULT 0"},
@@ -1939,6 +1946,7 @@ def migrate_sqlite():
     apply_project_code_email_migration()
     apply_share_keyword_migration()
     apply_email_optout_migration()
+    apply_share_link_code_migration()
     apply_walkthrough_migration()
     apply_walkthrough_capture_migration()
 
@@ -2214,6 +2222,25 @@ def apply_email_optout_migration():
     db.session.commit()
 
 
+def apply_share_link_code_migration():
+    """Add the share access-mode and code-attempt columns for link+code shares."""
+    if db.session.get(SchemaMigration, SHARE_LINK_CODE_SCHEMA_REVISION):
+        return
+    tables = set(inspect(db.engine).get_table_names())
+    if "project_access" in tables:
+        columns = {column["name"] for column in inspect(db.engine).get_columns("project_access")}
+        if "access_mode" not in columns:
+            db.session.execute(text(
+                'ALTER TABLE "project_access" ADD COLUMN "access_mode" VARCHAR(10) NOT NULL DEFAULT \'email\''
+            ))
+        if "code_attempts" not in columns:
+            db.session.execute(text(
+                'ALTER TABLE "project_access" ADD COLUMN "code_attempts" INTEGER NOT NULL DEFAULT 0'
+            ))
+    db.session.add(SchemaMigration(revision=SHARE_LINK_CODE_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_project_code_email_migration():
     """Persist client code recipients and weekly email threading state."""
     if db.session.get(SchemaMigration, PROJECT_CODE_EMAIL_SCHEMA_REVISION):
@@ -2331,17 +2358,42 @@ def shared_project(token):
         abort(404)
     already_in = (session.get("viewer_token") == access.share_token
                   and session.get("viewer_code") == access.code)
-    keyword_gate = bool(access.access_keyword)
-    allow_list = share_allow_list(access)
+    code_mode = access.access_mode == "code"
+    keyword_gate = (not code_mode) and bool(access.access_keyword)
+    allow_list = [] if code_mode else share_allow_list(access)
     next_tab = request.values.get("next_tab") or request.args.get("tab", "map")
+    locked = code_mode and (access.code_attempts or 0) >= 5
 
-    def _gate(step="request", email="", dev_code=""):
+    def _gate(step="request", email="", dev_code="", tries_left=None):
         return render_template("access.html", share_token=token, next_tab=next_tab,
                                project_name=access.project, keyword_gate=keyword_gate,
                                email_gate=bool(allow_list), step=step, prefill_email=email,
-                               dev_code=dev_code, google_enabled=google_oauth_enabled())
+                               dev_code=dev_code, google_enabled=google_oauth_enabled(),
+                               code_gate=code_mode, locked=locked, tries_left=tries_left)
 
     if request.method == "POST" and not already_in:
+        if code_mode:
+            if locked:
+                flash("This link is locked after too many incorrect codes. Ask the project team for a new link.", "error")
+                return _gate()
+            submitted = request.form.get("code", "").strip()
+            if submitted and secrets.compare_digest(submitted.casefold(), access.access_keyword.casefold()):
+                if access.code_attempts:
+                    access.code_attempts = 0
+                    db.session.commit()
+                session["viewer_code"] = access.code
+                session["viewer_token"] = access.share_token
+                return redirect(url_for("shared_project", token=token, tab=next_tab))
+            access.code_attempts = (access.code_attempts or 0) + 1
+            db.session.commit()
+            remaining = max(0, 5 - access.code_attempts)
+            locked = remaining == 0
+            if remaining:
+                flash(f"That code was not recognized. {remaining} tr{'y' if remaining == 1 else 'ies'} left "
+                      "before this link locks.", "error")
+            else:
+                flash("This link is now locked after too many incorrect codes. Ask the project team for a new link.", "error")
+            return _gate(tries_left=remaining)
         if keyword_gate:
             if request.form.get("step") == "verify":
                 pending = session.get("share_pending") or {}
@@ -4731,9 +4783,11 @@ def create_project_access():
         abort(400, "Project is required")
     if not user_can_upload_project(project):
         abort(403)
+    mode = "code" if request.form.get("access_mode") == "code" else "email"
     keyword = request.form.get("access_keyword", "").strip()[:80]
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{3,79}", keyword):
-        flash("Enter a share keyword of 4-80 characters (letters, numbers, spaces, hyphens or underscores).", "error")
+        flash(f"Enter a {'code' if mode == 'code' else 'keyword'} of 4-80 characters "
+              "(letters, numbers, spaces, hyphens or underscores).", "error")
         return redirect(url_for("admin") + "#project-access")
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
@@ -4764,16 +4818,26 @@ def create_project_access():
     else:
         access = ProjectAccess(project=project, code=code, share_token=secrets.token_urlsafe(32))
         db.session.add(access)
+    if mode == "code":
+        recipients = []  # link+code shares are not restricted to an email allow-list
+        if not expiration_date:
+            expiration_date = (now_utc() + timedelta(days=14)).date()
     access.expires_at = datetime.combine(expiration_date, datetime.max.time()) if expiration_date else None
     access.revoked_at = None
     access.allow_overview = False
     access.allow_media = True
     access.allow_documents = False
+    access.access_mode = mode
+    access.code_attempts = 0
     previous_emails = set(share_allow_list(access))
     access.client_emails = ",".join(recipients)
     access.access_keyword = keyword
     db.session.commit()
-    audit("project_access", "project", project, "Configured a viewer share keyword and email allow-list")
+    audit("project_access", "project", project, f"Configured a {mode}-mode viewer share")
+    if mode == "code":
+        flash(f"Link + code access created for {project}. Share the link and code; the link locks after "
+              "5 wrong codes and expires on the chosen date. Re-save here any time to issue a fresh link.", "success")
+        return redirect(url_for("admin") + "#project-access")
     new_emails = [r for r in recipients if r.strip().lower() not in previous_emails]
     invited = send_share_invites(access, new_emails) if new_emails else 0
     if recipients:
