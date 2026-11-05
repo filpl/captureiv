@@ -1018,8 +1018,11 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 400)
         response = client.post("/register", data=registration_data)
         self.assertEqual(response.status_code, 201)
+        # A duplicate signup must not reveal that the email is already registered:
+        # it returns the same pending response as a new signup and creates nothing
+        # (verified by the company/subscription counts below).
         duplicate = client.post("/register", data=registration_data)
-        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(duplicate.status_code, 201)
         with portal.app.app_context():
             user = portal.User.query.filter_by(email="pat@example.test").first()
             membership = portal.CompanyMembership.query.filter_by(user_id=user.id).first()
@@ -1061,6 +1064,16 @@ class TenantIsolationTests(unittest.TestCase):
             user = portal.User.query.filter_by(email="pat@example.test").first()
             self.assertTrue(user.email_verified)
             self.assertFalse(user.active)
+
+    def test_project_less_tenant_models_scope_for_employees_without_error(self):
+        # StorageReservation is a TENANT_MODEL with no `project` column. The
+        # employee (non-admin) tenant filter must scope it by company only; adding
+        # the project predicate raised AttributeError and 500'd employee requests
+        # (e.g. the upload quota-reservation path).
+        with portal.app.test_request_context("/"):
+            login_user(portal.db.session.get(portal.User, self.employee_id))
+            reservations = portal.StorageReservation.query.all()
+        self.assertEqual(reservations, [])
 
     def test_password_reset_response_does_not_reveal_if_email_exists(self):
         client = portal.app.test_client()

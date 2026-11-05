@@ -783,7 +783,10 @@ def apply_company_scope(execute_state):
         g.resolving_company_scope = False
     statement = execute_state.statement
     for model in TENANT_MODELS:
-        if is_company_admin:
+        # Models without a `project` column (e.g. StorageReservation) are scoped
+        # by company only; adding the project predicate would raise at statement
+        # build and 500 employee requests that touch them.
+        if is_company_admin or not hasattr(model, "project"):
             criterion = lambda entity: entity.company_id == company_id
         else:
             criterion = lambda entity: (entity.company_id == company_id) & entity.project.in_(assigned_projects)
@@ -1057,7 +1060,7 @@ def rate_limit_sensitive_routes():
              "/register": ("registration", 8, timedelta(hours=1)),
              "/forgot-password": ("recovery", 8, timedelta(hours=1)),
              "/resend-verification": ("verification", 8, timedelta(hours=1)),
-             "/": ("viewer-code", 20, timedelta(minutes=10))}.get(request.path)
+             "/": ("viewer-code-open", 12, timedelta(minutes=10))}.get(request.path)
     if route is None and request.path.startswith("/share/"):
         route = ("viewer-code", 20, timedelta(minutes=10))
     if not route:
@@ -1069,6 +1072,15 @@ def rate_limit_sensitive_routes():
     count = RateLimitEvent.query.filter_by(route=key, subject_hash=subject).filter(RateLimitEvent.created_at >= cutoff).count()
     if count >= maximum:
         abort(429, "Too many attempts. Wait a while and try again.")
+    # The tokenless public code box ('/') resolves a 4-letter code across every
+    # tenant, so a single IP limit cannot stop a distributed guess. Cap total
+    # attempts globally as a circuit breaker. The '/share/<token>' flow needs the
+    # unguessable 256-bit link, so it is intentionally exempt and stays available
+    # to legitimate clients even while this breaker is tripped.
+    if key == "viewer-code-open":
+        global_attempts = RateLimitEvent.query.filter_by(route=key).filter(RateLimitEvent.created_at >= cutoff).count()
+        if global_attempts >= 240:
+            abort(429, "Too many attempts. Wait a while and try again.")
     db.session.add(RateLimitEvent(route=key, subject_hash=subject))
     db.session.commit()
 
@@ -2359,8 +2371,6 @@ def register():
             flash("Use a password with at least 12 characters.", "error")
         elif password != confirm:
             flash("The passwords do not match.", "error")
-        elif User.query.filter(or_(User.username == email, User.email == email)).first():
-            flash("An account already exists for that email. Sign in or recover the account.", "error")
         elif request.form.get("billing_interval", "monthly") not in {"monthly", "annual"}:
             flash("Choose monthly or annual billing.", "error")
         elif (request.form.get("billing_interval") == "annual" and
@@ -2369,6 +2379,21 @@ def register():
         elif not plan or not plan.active or plan.custom_pricing:
             flash("Choose an available subscription plan.", "error")
         else:
+            existing_account = User.query.filter(or_(User.username == email, User.email == email)).first()
+            if existing_account:
+                # Uniform response: never reveal whether an email is already
+                # registered. Notify the real owner instead of the submitter, and
+                # return the same pending page a brand-new signup would see.
+                try:
+                    send_account_email(existing_account.email or email, "About your Capture IV account",
+                        "Someone tried to create a Capture IV account with this email address, "
+                        "but an account already exists.\n\n"
+                        f"If this was you, sign in or recover your account: {absolute_app_url('login')}\n\n"
+                        "If this wasn't you, you can ignore this message; no new account was created.")
+                except Exception:
+                    app.logger.exception("Duplicate-registration notice delivery failed")
+                return render_template("registration_pending.html", email=email, plan=plan,
+                                       local_verify_url="", email_sent=True), 201
             # Registration starts pending. Email verification alone never grants paid access.
             company = Company(name=company_name, status="pending", storage_limit_bytes=plan.storage_limit_bytes)
             display_name = " ".join(part for part in (first, last) if part).strip() or email.split("@", 1)[0]
@@ -2379,12 +2404,22 @@ def register():
                 db.session.flush()
             except IntegrityError:
                 # A concurrent signup may have passed the earlier duplicate
-                # lookup. Let the database uniqueness constraint arbitrate,
-                # then return the normal duplicate-account message.
+                # lookup. Let the database uniqueness constraint arbitrate, then
+                # return the same uniform pending response without revealing that
+                # the email already has an account.
                 db.session.rollback()
-                flash("An account already exists for that email. Sign in or recover the account.", "error")
-                return render_template("register.html", plans=plans, requested_plan=requested_plan,
-                                       pending_checkout=pending_checkout), 400
+                existing_account = User.query.filter(or_(User.username == email, User.email == email)).first()
+                if existing_account:
+                    try:
+                        send_account_email(existing_account.email or email, "About your Capture IV account",
+                            "Someone tried to create a Capture IV account with this email address, "
+                            "but an account already exists.\n\n"
+                            f"If this was you, sign in or recover your account: {absolute_app_url('login')}\n\n"
+                            "If this wasn't you, you can ignore this message; no new account was created.")
+                    except Exception:
+                        app.logger.exception("Duplicate-registration notice delivery failed")
+                return render_template("registration_pending.html", email=email, plan=plan,
+                                       local_verify_url="", email_sent=True), 201
             membership = CompanyMembership(company_id=company.id, user_id=user.id, role="company_admin", status="pending")
             subscription = CompanySubscription(company_id=company.id, plan_id=plan.id, status="pending", billing_interval=request.form.get("billing_interval", "monthly"))
             db.session.add_all([membership, subscription])
