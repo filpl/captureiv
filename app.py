@@ -1586,6 +1586,38 @@ def issue_share_access_otp(access, email):
     return code, delivered
 
 
+def google_oauth_enabled():
+    """True when a Google OAuth client is configured, so viewers can sign in
+    with Google instead of confirming an emailed one-time code."""
+    return bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+                and os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "").strip())
+
+
+def _google_verified_email(code, redirect_uri):
+    """Exchange a Google authorization code for the signed-in account's verified
+    email address (lower-cased), or None if it is missing or unverified."""
+    data = urlencode({
+        "code": code,
+        "client_id": os.environ["GOOGLE_OAUTH_CLIENT_ID"].strip(),
+        "client_secret": os.environ["GOOGLE_OAUTH_CLIENT_SECRET"].strip(),
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }).encode()
+    token_req = URLRequest("https://oauth2.googleapis.com/token", data=data,
+                           headers={"Content-Type": "application/x-www-form-urlencoded"})
+    with urlopen(token_req, timeout=15) as resp:
+        payload = json.loads(resp.read().decode())
+    access_token = payload.get("access_token")
+    if not access_token:
+        return None
+    info_req = URLRequest("https://openidconnect.googleapis.com/v1/userinfo",
+                          headers={"Authorization": f"Bearer {access_token}"})
+    with urlopen(info_req, timeout=15) as resp:
+        info = json.loads(resp.read().decode())
+    email = (info.get("email") or "").strip().lower()
+    return email if email and info.get("email_verified") else None
+
+
 def normalize_client_emails(value):
     recipients = []
     for entry in re.split(r"[\s,;]+", str(value or "").strip()):
@@ -2226,7 +2258,7 @@ def shared_project(token):
         return render_template("access.html", share_token=token, next_tab=next_tab,
                                project_name=access.project, keyword_gate=keyword_gate,
                                email_gate=bool(allow_list), step=step, prefill_email=email,
-                               dev_code=dev_code)
+                               dev_code=dev_code, google_enabled=google_oauth_enabled())
 
     if request.method == "POST" and not already_in:
         if keyword_gate:
@@ -2291,6 +2323,64 @@ def shared_project(token):
     if walkthrough_viewer and (not drone_viewer or request.args.get("tab") == "walkthrough"):
         return redirect(url_for("walkthrough.shared", token=token))
     return render_project_view(access)
+
+
+@app.get("/share/<token>/google")
+def share_google_start(token):
+    """Begin Google sign-in for an email-restricted share."""
+    g.allow_public_viewer_scope = True
+    access = ProjectAccess.query.filter_by(share_token=token).first()
+    if (not viewer_access_active(access) or not google_oauth_enabled()
+            or not share_allow_list(access)):
+        abort(404)
+    state = secrets.token_urlsafe(24)
+    session["google_share_state"] = state
+    session["google_share_token"] = token
+    session["google_share_tab"] = request.args.get("tab", "map")
+    params = urlencode({
+        "client_id": os.environ["GOOGLE_OAUTH_CLIENT_ID"].strip(),
+        "redirect_uri": absolute_app_url("share_google_callback"),
+        "response_type": "code",
+        "scope": "openid email",
+        "state": state,
+        "access_type": "online",
+        "prompt": "select_account",
+    })
+    return redirect("https://accounts.google.com/o/oauth2/v2/auth?" + params)
+
+
+@app.get("/share/google/callback")
+def share_google_callback():
+    """Finish Google sign-in: grant access only when the verified Google email
+    is on the share's allow-list."""
+    g.allow_public_viewer_scope = True
+    token = session.get("google_share_token", "")
+    expected_state = session.pop("google_share_state", None)
+    tab = session.pop("google_share_tab", "map")
+    session.pop("google_share_token", None)
+    state = request.args.get("state", "")
+    if (not google_oauth_enabled() or not token or not expected_state
+            or not secrets.compare_digest(state, expected_state)):
+        abort(400)
+    access = ProjectAccess.query.filter_by(share_token=token).first()
+    if not viewer_access_active(access):
+        abort(404)
+    if request.args.get("error") or not request.args.get("code"):
+        flash("Google sign-in was cancelled. Use the keyword, or try again.", "error")
+        return redirect(url_for("shared_project", token=token))
+    try:
+        email = _google_verified_email(request.args["code"], absolute_app_url("share_google_callback"))
+    except Exception:
+        app.logger.exception("Google share sign-in failed")
+        flash("Could not complete Google sign-in. Use the keyword, or try again.", "error")
+        return redirect(url_for("shared_project", token=token))
+    if email and email in share_allow_list(access):
+        session["viewer_code"] = access.code
+        session["viewer_token"] = access.share_token
+        session["viewer_email"] = email
+        return redirect(url_for("shared_project", token=token, tab=tab))
+    flash("That Google account is not on the approved list for this project.", "error")
+    return redirect(url_for("shared_project", token=token))
 
 
 @app.get("/project/<code>")

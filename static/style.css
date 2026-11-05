@@ -100,3 +100,6 @@
 .access-form-stack .access-submit{margin-top:12px}
 .access-resend{margin-top:14px;text-align:center}
 .access-resend .project-info-link{background:none;border:0;cursor:pointer;font:inherit}
+.access-google{display:flex;align-items:center;justify-content:center;gap:11px;width:100%;height:52px;border:1px solid #cbd0d3;border-radius:6px;background:#fff;color:#20262d;font:500 15px 'DM Sans';text-decoration:none;cursor:pointer}
+.access-google:hover{background:#f6f8f9;border-color:#b9c0c4}
+.access-google .g-icon{width:20px;height:20px;flex:none}

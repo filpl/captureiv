@@ -540,6 +540,44 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(fresh.post(f"/share/{token}", data={"_csrf": "t", "step": "verify", "otp": code}).status_code, 200)
         self.assertNotIn(b"PROJECT MEDIA", fresh.get(f"/share/{token}").data)
 
+    def test_google_sign_in_grants_access_only_to_allow_listed_accounts(self):
+        with portal.app.app_context():
+            # Reuse the shared "A project" access row (unique per company) so the
+            # test is independent of which other test created it first.
+            access = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).first()
+            if not access:
+                access = portal.ProjectAccess(project="A project", code="GGL1", company_id=1)
+                portal.db.session.add(access)
+            access.allow_media = True
+            access.access_keyword = "HarborPass"
+            access.client_emails = "client@harborstreet.com"
+            access.revoked_at = None
+            access.expires_at = None
+            portal.db.session.commit()
+            token = access.share_token
+        # An allow-listed, verified Google account unlocks the viewer with no keyword or code.
+        client = portal.app.test_client()
+        with client.session_transaction() as s:
+            s["google_share_state"] = "st"; s["google_share_token"] = token; s["google_share_tab"] = "map"
+        with patch.object(portal, "google_oauth_enabled", return_value=True), \
+                patch.object(portal, "_google_verified_email", return_value="client@harborstreet.com"):
+            ok = client.get("/share/google/callback?state=st&code=abc")
+        self.assertEqual(ok.status_code, 302)
+        self.assertIn(f"/share/{token}", ok.headers["Location"])
+        self.assertEqual(client.get(f"/share/{token}?tab=map").status_code, 200)
+        # A Google account that is not on the allow-list is refused.
+        other = portal.app.test_client()
+        with other.session_transaction() as s:
+            s["google_share_state"] = "st2"; s["google_share_token"] = token
+        with patch.object(portal, "google_oauth_enabled", return_value=True), \
+                patch.object(portal, "_google_verified_email", return_value="stranger@gmail.com"):
+            denied = other.get("/share/google/callback?state=st2&code=abc")
+        self.assertEqual(denied.status_code, 302)
+        self.assertNotIn(b"PROJECT MEDIA", other.get(f"/share/{token}").data)
+        # A missing/forged state is rejected before any token exchange.
+        with patch.object(portal, "google_oauth_enabled", return_value=True):
+            self.assertEqual(portal.app.test_client().get("/share/google/callback?state=x&code=abc").status_code, 400)
+
     def test_project_assigned_employee_can_manage_shares_only_for_their_projects(self):
         client = portal.app.test_client()
         with client.session_transaction() as state:
