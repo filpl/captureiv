@@ -7,12 +7,17 @@ const config=JSON.parse(fs.readFileSync('site.config.json','utf8'));
 const loginURL=process.env.PLATFORM_LOGIN_URL || config.platformLoginUrl;
 const signupURL=process.env.PLATFORM_SIGNUP_URL || config.platformSignupUrl;
 const enterpriseURL=process.env.PLATFORM_ENTERPRISE_URL || config.platformEnterpriseUrl;
+// Legal policies live on the platform; the marketing site redirects its /privacy, /terms, etc. paths there.
+const legalURL=(process.env.PLATFORM_LEGAL_URL || config.platformLegalUrl || new URL('/legal',new URL(loginURL,'https://construct.example')).href).replace(/\/$/,'');
 function validatePlatformURL(value,label){const parsed=new URL(value,'https://construct.example');if(!((value.startsWith('/')&&!value.startsWith('//'))||parsed.protocol==='https:'||parsed.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(parsed.hostname)))throw Error(`Use an HTTPS ${label} URL or a same-origin path.`);return value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 const htmlURL=validatePlatformURL(loginURL,'login'),htmlSignupURL=validatePlatformURL(signupURL,'signup'),htmlEnterpriseURL=validatePlatformURL(enterpriseURL,'enterprise request');
-const assets={};const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png'};
-const versions=Object.fromEntries(['site.css','site.js'].map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(web,file))).digest('hex').slice(0,12)]));
+const assets={};const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.mp4':'video/mp4'};
+// Large media is published as Cloudflare static assets (dist/public) so the Worker stays within its size limit.
+const staticMedia=new Set(['.jpg','.png','.mp4']);const staticFiles=[];
+const versions=Object.fromEntries(['site.css','site-theme.css','site.js'].map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(web,file))).digest('hex').slice(0,12)]));
 for(const file of fs.readdirSync(web)){
  const type=types[path.extname(file)];if(!type)continue;
+ if(staticMedia.has(path.extname(file))){staticFiles.push(file);continue}
  let bytes=fs.readFileSync(path.join(web,file));
  if(file.endsWith('.html')){let html=bytes.toString('utf8').replaceAll('{{PLATFORM_LOGIN_URL}}',htmlURL).replaceAll('{{PLATFORM_SIGNUP_URL}}',htmlSignupURL).replaceAll('{{PLATFORM_ENTERPRISE_URL}}',htmlEnterpriseURL);html=html.replace('<head>','<head><meta name="application-name" content="Capture IV"><meta property="og:site_name" content="Capture IV">');for(const [asset,hash] of Object.entries(versions))html=html.replaceAll('"/'+asset+'"','"/'+asset+'?v='+hash+'"');bytes=Buffer.from(html)}
  assets['/'+file]={type,base64:bytes.toString('base64')};
@@ -20,17 +25,45 @@ for(const file of fs.readdirSync(web)){
 const contactSource=fs.readFileSync('worker/contact.js','utf8').replace('export async function contact','async function contact');
 const router=`
 const platformLoginURL=${JSON.stringify(loginURL)};
+const platformLegalURL=${JSON.stringify(legalURL)};
+const legalSlugs=new Set(['terms','privacy','cookies','billing','refunds','copyright','accessibility']);
 const aliases={'/':'/index.html','/platform':'/platform.html','/solutions':'/solutions.html','/clients':'/clients.html','/about':'/about.html','/about-us':'/about.html','/contact':'/contact.html','/pricing':'/pricing.html','/portal':'/portal.html'};
 export default {async fetch(request,env){
  const url=new URL(request.url);
  if(url.pathname==='/portal')return Response.redirect(new URL(platformLoginURL,request.url).href,302);
+ const legalSlug=url.pathname.replace(/\\/$/,'').replace(/^\\/legal/,'').replace(/^\\//,'');
+ if(url.pathname.replace(/\\/$/,'')==='/legal')return Response.redirect(new URL(platformLegalURL,request.url).href,302);
+ if(legalSlugs.has(legalSlug))return Response.redirect(new URL(platformLegalURL+'/'+legalSlug,request.url).href,302);
  if(url.pathname==='/api/contact')return contact(request,env);
  if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405,headers:{Allow:'GET, HEAD'}});
  let key=aliases[url.pathname.replace(/\\/$/,'')||'/']||url.pathname;
  const asset=assets[key];
+ if(!asset&&env&&env.ASSETS){
+  if(/\\.(?:mp4|webm|mov)$/i.test(url.pathname)){
+   const full=await env.ASSETS.fetch(new Request(url.origin+url.pathname));
+   if(full.status!==200)return full;
+   const vbytes=new Uint8Array(await full.arrayBuffer());const vsize=vbytes.length;const vtype=full.headers.get('Content-Type')||'video/mp4';
+   const vrange=/^bytes=(\\d*)-(\\d*)$/.exec(request.headers.get('Range')||'');
+   if(vrange){
+    let vstart=vrange[1]===''?vsize-Number(vrange[2]):Number(vrange[1]);let vend=vrange[1]===''||vrange[2]===''?vsize-1:Number(vrange[2]);
+    if(!(vstart>=0&&vstart<=vend&&vstart<vsize))return new Response(null,{status:416,headers:{'Content-Range':'bytes */'+vsize,'Accept-Ranges':'bytes'}});
+    vend=Math.min(vend,vsize-1);
+    return new Response(request.method==='HEAD'?null:vbytes.slice(vstart,vend+1),{status:206,headers:{'Content-Type':vtype,'Content-Range':'bytes '+vstart+'-'+vend+'/'+vsize,'Content-Length':String(vend-vstart+1),'Accept-Ranges':'bytes','Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'}});
+   }
+   return new Response(request.method==='HEAD'?null:vbytes,{headers:{'Content-Type':vtype,'Content-Length':String(vsize),'Accept-Ranges':'bytes','Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'}});
+  }
+  return env.ASSETS.fetch(request);
+ }
  if(!asset)return new Response('Page not found. Return to Capture IV at /.',{status:404,headers:{'Content-Type':'text/plain; charset=utf-8'}});
  const bytes=Uint8Array.from(atob(asset.base64),c=>c.charCodeAt(0));
- return new Response(request.method==='HEAD'?null:bytes,{headers:{'Content-Type':asset.type,'Cache-Control':key.endsWith('.html')?'no-cache':'public, max-age=3600','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN'}});
+ const range=/^bytes=(\\d*)-(\\d*)$/.exec(request.headers.get('Range')||'');
+ if(range&&asset.type.startsWith('video/')){
+  const size=bytes.length;let start=range[1]===''?size-Number(range[2]):Number(range[1]);let end=range[1]===''||range[2]===''?size-1:Number(range[2]);
+  if(!(start>=0&&start<=end&&start<size))return new Response(null,{status:416,headers:{'Content-Range':'bytes */'+size}});
+  end=Math.min(end,size-1);
+  return new Response(request.method==='HEAD'?null:bytes.slice(start,end+1),{status:206,headers:{'Content-Type':asset.type,'Content-Range':'bytes '+start+'-'+end+'/'+size,'Content-Length':String(end-start+1),'Accept-Ranges':'bytes','Cache-Control':'public, max-age=3600','X-Content-Type-Options':'nosniff'}});
+ }
+ return new Response(request.method==='HEAD'?null:bytes,{headers:{'Accept-Ranges':asset.type.startsWith('video/')?'bytes':'none','Content-Type':asset.type,'Cache-Control':key.endsWith('.html')?'no-cache':'public, max-age=3600','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN'}});
 }};
 `;
 const worker='const assets='+JSON.stringify(assets)+';\n'+contactSource+'\n'+router;
@@ -39,5 +72,7 @@ const worker='const assets='+JSON.stringify(assets)+';\n'+contactSource+'\n'+rou
 fs.rmSync(dist,{recursive:true,force:true});
 fs.mkdirSync(path.join(dist,'server'),{recursive:true});
 fs.writeFileSync(path.join(dist,'server/index.js'),worker);
+fs.mkdirSync(path.join(dist,'public'),{recursive:true});
+for(const file of staticFiles)fs.copyFileSync(path.join(web,file),path.join(dist,'public',file));
 
 console.log('Built Capture IV Worker, eight pages, assets and contact migrations.');
