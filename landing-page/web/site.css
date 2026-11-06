@@ -134,7 +134,7 @@ html{scroll-padding-top:88px}body{background:var(--paper);color:var(--ink);backg
 
 /* Translucent, responsive site navigation with a compact scrolled state. */
 .nav{background:rgba(15,33,43,.76)!important;border-color:#ffffff20;box-shadow:0 8px 30px #10212a20;backdrop-filter:blur(18px) saturate(150%);-webkit-backdrop-filter:blur(18px) saturate(150%);transition:background .24s ease,border-color .24s ease,box-shadow .24s ease}
-.nav.is-scrolled{background:rgba(11,25,33,.95)!important;border-color:#42d6c42e;box-shadow:0 10px 32px #0b1c2680}
+.nav.is-scrolled{background:rgba(255,255,255,.95)!important;border-color:#dce7ea;box-shadow:0 6px 24px #17303b14}
 .nav .wrap{height:74px;transition:height .24s ease}
 .nav.is-scrolled .wrap{height:66px}
 .nav .logo-lockup{color:#f4fafb}.nav .logo-lockup .iv{color:#72e0cf}
