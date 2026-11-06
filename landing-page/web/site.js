@@ -95,3 +95,33 @@ if(platformDemo){
  dateButton.addEventListener('click',openVideo);closeButton.addEventListener('click',()=>{closeVideo();if(!reducedMotion)timer=setTimeout(runDateDemo,1200)});
  if(!reducedMotion){if('IntersectionObserver'in window){observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){runDateDemo();observer.disconnect()}},{threshold:.35});observer.observe(platformDemo)}else runDateDemo()}
 }
+
+/* Cookie consent banner — shown once per visitor, remembered in localStorage.
+   Choice is exposed on <html data-cookie-consent="all|essential"> and window.cookieConsent
+   so any future analytics can gate on it. */
+(function(){
+  var KEY='civ-cookie-consent';
+  var saved=null; try{saved=localStorage.getItem(KEY)}catch(e){}
+  if(saved){document.documentElement.setAttribute('data-cookie-consent',saved);window.cookieConsent=saved;return;}
+  function build(){
+    if(document.querySelector('.cookie-bar'))return;
+    var bar=document.createElement('div');
+    bar.className='cookie-bar';
+    bar.setAttribute('role','dialog');
+    bar.setAttribute('aria-label','Cookie consent');
+    bar.setAttribute('aria-live','polite');
+    bar.innerHTML='<div class="cookie-bar-inner"><p class="cookie-bar-text"><b>We use cookies.</b> Some keep this site working; others help us see how it’s used. Accept all, or keep only the essential ones.</p><div class="cookie-bar-actions"><button type="button" class="cookie-btn cookie-btn-ghost" data-cookie="essential">Essential only</button><button type="button" class="cookie-btn cookie-btn-primary" data-cookie="all">Accept all cookies</button></div></div>';
+    document.body.appendChild(bar);
+    requestAnimationFrame(function(){bar.classList.add('is-in')});
+    function choose(v){
+      try{localStorage.setItem(KEY,v)}catch(e){}
+      document.documentElement.setAttribute('data-cookie-consent',v);
+      window.cookieConsent=v;
+      bar.classList.remove('is-in');
+      setTimeout(function(){if(bar.parentNode)bar.parentNode.removeChild(bar)},320);
+    }
+    var btns=bar.querySelectorAll('[data-cookie]');
+    for(var i=0;i<btns.length;i++){(function(b){b.addEventListener('click',function(){choose(b.getAttribute('data-cookie'))})})(btns[i]);}
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',build);else build();
+})();
