@@ -920,6 +920,27 @@ def protect_private_upload_directory():
             abort(404)
 
 
+VIEWER_ENDPOINTS = {"index", "shared_project", "project_view", "protected_file"}
+
+
+@app.after_request
+def apply_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    # Cross-origin requests (e.g. Google Maps) receive only the origin, which keeps
+    # share-link tokens out of third-party logs while the Maps referrer restriction
+    # (https://app.captureiv.com/*) still matches.
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), payment=(), usb=()")
+    if app.config.get("SESSION_COOKIE_SECURE"):
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if request.endpoint in VIEWER_ENDPOINTS:
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+        if request.endpoint != "protected_file":
+            response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.before_request
 def rate_limit_sensitive_routes():
     if request.method != "POST":
@@ -1394,6 +1415,45 @@ def parse_date(value, fallback=None):
 def viewer_access_active(access):
     return bool(access and not access.revoked_at
                 and (not access.expires_at or access.expires_at > now_utc()))
+
+
+# Client viewer hardening: access needs the project's share link *and* its code,
+# a link locks for everyone after repeated wrong codes, and an unlocked viewer
+# session lasts a limited time before the code must be entered again.
+VIEWER_SESSION_MAX_AGE = timedelta(hours=12)
+VIEWER_LINK_FAILURE_LIMIT = 10
+VIEWER_LINK_FAILURE_WINDOW = timedelta(hours=1)
+
+
+def grant_viewer_session(access):
+    session["viewer_code"] = access.code
+    session["viewer_token"] = access.share_token
+    session["viewer_granted_at"] = int(now_utc().timestamp())
+
+
+def viewer_session_fresh():
+    try:
+        granted_at = int(session.get("viewer_granted_at"))
+    except (TypeError, ValueError):
+        return False
+    age = now_utc().timestamp() - granted_at
+    return 0 <= age <= VIEWER_SESSION_MAX_AGE.total_seconds()
+
+
+def viewer_link_subject(token):
+    return hashlib.sha256((app.config["SECRET_KEY"] + "|viewer-link|" + token).encode()).hexdigest()
+
+
+def viewer_link_locked(token):
+    cutoff = now_utc() - VIEWER_LINK_FAILURE_WINDOW
+    failures = (RateLimitEvent.query.filter_by(route="viewer-link-failure", subject_hash=viewer_link_subject(token))
+                .filter(RateLimitEvent.created_at >= cutoff).count())
+    return failures >= VIEWER_LINK_FAILURE_LIMIT
+
+
+def record_viewer_link_failure(token):
+    db.session.add(RateLimitEvent(route="viewer-link-failure", subject_hash=viewer_link_subject(token)))
+    db.session.commit()
 
 
 def normalize_client_emails(value):
@@ -1940,13 +2000,9 @@ def index():
     # happens to have an unrelated company account signed in.
     g.allow_public_viewer_scope = True
     if request.method == "POST":
-        code = re.sub(r"[^A-Z]", "", request.form.get("code", "").upper())[:4]
-        access = ProjectAccess.query.filter_by(code=code).first() if len(code) == 4 else None
-        if viewer_access_active(access):
-            session["viewer_code"] = access.code
-            session["viewer_token"] = access.share_token
-            return redirect(url_for("shared_project", token=access.share_token))
-        flash("That project code was not recognized. Check the four letters and try again.", "error")
+        # A code by itself is no longer enough: it must be entered on the
+        # project's own share link. Same reply for any code, valid or not.
+        flash("Open the project link your project team sent you, then enter your 4-letter code there.", "error")
     return render_template("access.html")
 
 
@@ -1959,16 +2015,22 @@ def shared_project(token):
     if not company_feature_enabled("flight_scans", access.company_id):
         abort(404)
     if request.method == "POST":
+        if viewer_link_locked(token):
+            flash("This project link is temporarily locked after too many incorrect codes. "
+                  "Try again later or contact your project team.", "error")
+            return render_template("access.html", share_token=token, link_locked=True,
+                                   next_tab=request.form.get("next_tab", "map"), project_name=access.project), 429
         submitted = re.sub(r"[^A-Z]", "", request.form.get("code", "").upper())[:4]
         if len(submitted) != 4 or not secrets.compare_digest(submitted, access.code):
+            record_viewer_link_failure(token)
             flash("That project code was not recognized. Check the four letters and try again.", "error")
             return render_template("access.html", share_token=token,
                                    next_tab=request.form.get("next_tab", "map"), project_name=access.project)
-        session["viewer_code"] = access.code
-        session["viewer_token"] = access.share_token
+        grant_viewer_session(access)
         return redirect(url_for("shared_project", token=token,
                                 tab=request.form.get("next_tab", "map")))
-    if session.get("viewer_code") != access.code or session.get("viewer_token") != access.share_token:
+    if (session.get("viewer_code") != access.code or session.get("viewer_token") != access.share_token
+            or not viewer_session_fresh()):
         return render_template("access.html", share_token=token,
                                next_tab=request.args.get("tab", "map"), project_name=access.project)
     return render_project_view(access)
@@ -1976,12 +2038,10 @@ def shared_project(token):
 
 @app.get("/project/<code>")
 def project_view(code):
-    """Legacy URLs no longer grant access by themselves; send them through code entry."""
-    g.allow_public_viewer_scope = True
-    access = ProjectAccess.query.filter_by(code=code.upper()).first()
-    if not viewer_access_active(access):
-        abort(404)
-    return redirect(url_for("shared_project", token=access.share_token, **request.args.to_dict()))
+    """Legacy code-only URLs. Never reveal a project's share link from its code;
+    every code (valid, expired or unknown) gets the same instruction page."""
+    flash("Open the project link your project team sent you, then enter your 4-letter code there.", "error")
+    return render_template("access.html"), 404
 
 
 def render_project_view(access):
@@ -3830,7 +3890,8 @@ def protected_file(filename):
     else:
         g.allow_public_viewer_scope = True
         access = ProjectAccess.query.filter_by(code=viewer_code).first() if viewer_code else None
-        if not viewer_access_active(access):
+        if (not viewer_access_active(access) or session.get("viewer_token") != access.share_token
+                or not viewer_session_fresh()):
             abort(403)
         flight_record = Flight.query.filter_by(filename=safe, project=access.project, company_id=access.company_id).first()
         document_record = ProjectFile.query.filter_by(filename=safe, project=access.project, company_id=access.company_id).first()
