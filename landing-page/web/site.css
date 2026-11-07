@@ -514,3 +514,10 @@ h1 em,.hero h1 em{color:#1f7bff !important}
 
 /* Pricing: small plan sub-label under the plan name */
 .package-card .package-subnote{margin:-2px 0 12px;color:#60737e;font-size:13px;font-weight:600;letter-spacing:.2px}
+
+/* Research notes as short snippets; Reality Capture photo wider */
+.research-article>p{font-size:15px;line-height:1.6}
+.research-article footer{margin-top:auto}
+.field-capture-inner{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}
+.field-capture-media img{width:100%;height:min(560px,70vh);object-fit:cover;object-position:62% center}
+@media(max-width:860px){.field-capture-inner{grid-template-columns:1fr}.field-capture-media img{height:auto;max-height:440px}}
