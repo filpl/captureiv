@@ -42,7 +42,7 @@
     marker.on('click',event=>selectRoute(path,line,marker,event.latlng));
   });
   const imageLatLng=(x,y,scale)=>[imageBounds.getNorth()-(imageBounds.getNorth()-imageBounds.getSouth())*Number(y)/scale,imageBounds.getWest()+(imageBounds.getEast()-imageBounds.getWest())*Number(x)/scale];
-  if(module==='image'&&imageBounds){(window.PROJECT_MAP_PINS||[]).forEach(pin=>{const marker=L.marker(imageLatLng(pin.x,pin.y,100),{icon:L.divIcon({className:'viewer-photo-pin',html:`<span>${String(pin.direction||'•').replace(/[&<>"']/g,'')}</span>`,iconSize:[32,32],iconAnchor:[16,16]})}).addTo(map).bindTooltip(pin.label||pin.direction);imagePinMarkers.push({marker,x:pin.x,y:pin.y,scale:100})})}
+  if(module==='image'&&imageBounds){(window.PROJECT_MAP_PINS||[]).forEach(pin=>{const marker=L.marker(imageLatLng(pin.x,pin.y,100),{icon:L.divIcon({className:'viewer-photo-pin',html:`<span>${String(pin.direction||'•').replace(/[&<>"']/g,'')}</span>`,iconSize:[32,32],iconAnchor:[16,16]})}).addTo(map).bindTooltip(document.createTextNode(String(pin.label||pin.direction||"")));imagePinMarkers.push({marker,x:pin.x,y:pin.y,scale:100})})}
   if(module==='image'&&imageBounds){
     const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     (window.PROJECT_PHOTO_PINS||[]).forEach(pin=>{
@@ -138,7 +138,7 @@
       const bounds=imageBounds||map.getBounds();
       (window.PROJECT_MAP_PINS||[]).forEach(pin=>{
         const lat=bounds.getNorth()-(bounds.getNorth()-bounds.getSouth())*Number(pin.y)/100,lng=bounds.getWest()+(bounds.getEast()-bounds.getWest())*Number(pin.x)/100;
-        L.marker([lat,lng],{icon:L.divIcon({className:'viewer-photo-pin',html:`<span>${String(pin.direction||'•').replace(/[&<>"']/g,'')}</span>`,iconSize:[32,32],iconAnchor:[16,16]})}).addTo(paneMap).bindTooltip(pin.label||pin.direction);
+        L.marker([lat,lng],{icon:L.divIcon({className:'viewer-photo-pin',html:`<span>${String(pin.direction||'•').replace(/[&<>"']/g,'')}</span>`,iconSize:[32,32],iconAnchor:[16,16]})}).addTo(paneMap).bindTooltip(document.createTextNode(String(pin.label||pin.direction||"")));
       });
     }
     addCompareRoutes(paneMap,routeLayer,routeDate);

@@ -331,7 +331,7 @@ class TenantIsolationTests(unittest.TestCase):
         with patch.dict(os.environ, {"STORAGE_BACKEND": "r2"}), patch.object(portal, "R2Storage", return_value=storage):
             response = client.post("/admin/document", data={
                 "_csrf": csrf, "date": "2026-10-19", "name": "Private cloud document",
-                "project": "A project", "file": (BytesIO(b"private document bytes"), "site-report.pdf"),
+                "project": "A project", "file": (BytesIO(b"%PDF-1.4 private document bytes"), "site-report.pdf"),
             }, content_type="multipart/form-data")
             self.assertEqual(response.status_code, 302)
             self.assertEqual(len(storage.uploads), 1)
@@ -1273,6 +1273,34 @@ class TenantIsolationTests(unittest.TestCase):
             portal.db.session.get(portal.User, self.user_a_id).platform_owner = False
             portal.db.session.commit()
 
+    def test_uploads_must_match_their_file_type(self):
+        ok = portal.upload_signature_ok
+        self.assertTrue(ok("pdf", b"%PDF-1.7 ..."))
+        self.assertTrue(ok("mp4", b"\x00\x00\x00\x18ftypmp42"))
+        self.assertTrue(ok("jpg", b"\xff\xd8\xff\xe0JFIF"))
+        self.assertTrue(ok("docx", b"PK\x03\x04rest"))
+        self.assertTrue(ok("csv", b"date,flight\n2025-10-24,F-031\n"))
+        self.assertTrue(ok("txt", "\ufeffSite notes".encode("utf-16")))
+        # Disguised or suspicious files are blocked.
+        self.assertFalse(ok("pdf", b"MZ\x90\x00 windows executable"))
+        self.assertFalse(ok("jpg", b"<html><script>alert(1)</script>"))
+        self.assertFalse(ok("mp4", b"#!/bin/sh\nrm -rf /"))
+        self.assertFalse(ok("txt", b"notes <script>alert(1)</script>"))
+        self.assertFalse(ok("csv", b"a,b\n<svg onload=alert(1)>"))
+        self.assertFalse(ok("txt", b"\x7fELF\x02\x01\x01\x00"))
+        self.assertFalse(ok("exe", b"MZ"))
+        with self.assertRaisesRegex(ValueError, "does not match its .pdf type"):
+            with portal.app.test_request_context():
+                portal.save_upload(FileStorage(stream=BytesIO(b"<html>fake</html>"), filename="report.pdf"))
+
+    def test_security_headers_and_clean_project_names(self):
+        response = portal.app.test_client().get("/login")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+        self.assertEqual(portal.clean_line("Site A\r\nBcc: x@evil.test\x00", 160), "Site A Bcc: x@evil.test")
+        self.assertEqual(portal.clean_line("  Tower  Two  ", 160), "Tower  Two")
+
     def test_annual_billing_is_hidden_and_rejected_until_enabled(self):
         client = portal.app.test_client()
         with patch.dict(os.environ, {"ANNUAL_BILLING_ENABLED": ""}):
@@ -1548,11 +1576,11 @@ class TenantIsolationTests(unittest.TestCase):
         uploaded = None
         with patch.dict(portal.os.environ, {"STORAGE_BACKEND": "local"}), portal.app.test_request_context("/admin/upload"):
             login_user(portal.db.session.get(portal.User, user_id))
-            uploaded = portal.save_upload(FileStorage(stream=BytesIO(b"a" * 500), filename="large.mp4"))
+            uploaded = portal.save_upload(FileStorage(stream=BytesIO(b"\x00\x00\x00\x18ftyp" + b"a" * 492), filename="large.mp4"))
             self.assertEqual(uploaded[1], 500)
             self.assertIsNotNone(uploaded[4])
             with self.assertRaisesRegex(ValueError, "storage allowance"):
-                portal.save_upload(FileStorage(stream=BytesIO(b"b" * 200), filename="overflow.mp4"))
+                portal.save_upload(FileStorage(stream=BytesIO(b"\x00\x00\x00\x18ftyp" + b"b" * 192), filename="overflow.mp4"))
             reservation = portal.StorageReservation.query.filter_by(id=uploaded[4], company_id=company_id).one()
             self.assertEqual(reservation.file_size, 500)
             portal.release_storage_reservation(uploaded[4])

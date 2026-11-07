@@ -48,6 +48,15 @@ def _header_matches(ext, header):
     return False
 
 
+def _id(value):
+    """Parse a record id from JSON; anything malformed becomes 0 (owned() then 404s)."""
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return number if 0 < number < 2**31 else 0
+
+
 def _clean(value, limit):
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
@@ -457,7 +466,7 @@ def create_walkthrough_blueprint(core):
     @bp.post("/api/sessions")
     def create_session():
         body = json_body()
-        sheet = owned(Sheet, int(body.get("sheet_id") or 0))
+        sheet = owned(Sheet, _id(body.get("sheet_id")))
         require_edit(sheet.project)
         capture_date = core.parse_date(body.get("date"))
         if not capture_date:
@@ -567,7 +576,7 @@ def create_walkthrough_blueprint(core):
     @bp.post("/api/points")
     def create_point():
         body = json_body()
-        session_row = owned(WalkSession, int(body.get("session_id") or 0))
+        session_row = owned(WalkSession, _id(body.get("session_id")))
         require_edit(session_row.project)
         x, y = _fraction(body.get("x")), _fraction(body.get("y"))
         if x is None or y is None:
@@ -602,7 +611,7 @@ def create_walkthrough_blueprint(core):
             row.model_id = row.mx = row.my = row.mz = None
         elif "m" in body:
             coords = body.get("m")
-            model = owned(Model3D, int(body.get("model_id") or 0))
+            model = owned(Model3D, _id(body.get("model_id")))
             if model.project != row.project or not isinstance(coords, list) or len(coords) != 3:
                 return error("Place the point on the 3D model.")
             values = [_coordinate(value) for value in coords]

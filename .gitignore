@@ -14,3 +14,10 @@ static/uploads/*
 
 # Local Claude Code session artifacts (screenshots, ad renders, launch config)
 .claude/
+
+# Never commit saved logins or captured pages (cookie jars, HAR files, curl output)
+cj*.txt
+*.cookies
+cookies.txt
+*.har
+/gate*.html

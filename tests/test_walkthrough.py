@@ -83,6 +83,12 @@ class WalkthroughTests(unittest.TestCase):
         self.assertEqual(session.status_code, 200, session.get_data(as_text=True))
         return sheet.get_json()["id"], session.get_json()["id"]
 
+    def test_malformed_ids_are_rejected_without_server_errors(self):
+        admin = self.client_for("admin")
+        for bad in ["abc", [1], 1e300, -5, None, {"x": 1}]:
+            response = self.post(admin, "/walkthrough/api/sessions", json={"sheet_id": bad, "date": "2026-10-21"})
+            self.assertLess(response.status_code, 500, (bad, response.status_code))
+
     # ------------------------------------------------------- field capture
     def test_video_walk_keeps_timing_and_video_through_edits(self):
         admin = self.client_for("admin")

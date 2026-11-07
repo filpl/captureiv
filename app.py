@@ -977,6 +977,21 @@ def legal_url(slug):
 app.jinja_env.globals["legal_url"] = legal_url
 app.jinja_env.globals["annual_billing_enabled"] = annual_billing_enabled
 
+DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(24))
+
+
+@app.after_request
+def security_headers(response):
+    """Browser protections on every response; a route's own headers win."""
+    headers = response.headers
+    headers.setdefault("X-Content-Type-Options", "nosniff")
+    headers.setdefault("X-Frame-Options", "DENY")
+    headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+    if app.config.get("APP_ENV") == "production":
+        headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
 
 def legal_details():
     return {
@@ -1001,7 +1016,7 @@ def record_policy_acceptance(user_id, resource_type, resource_id):
         resource_type=resource_type, resource_id=str(resource_id),
         detail=json.dumps({"terms_version": ACCOUNT_TERMS_VERSION,
                            "privacy_notice_version": PRIVACY_NOTICE_VERSION}),
-        ip_address=(request.headers.get("X-Forwarded-For", request.remote_addr) or "")[:80]))
+        ip_address=(request.remote_addr or "")[:80]))
 
 WORKSPACE_PAGES = {"dashboard", "admin", "upload", "site_capture", "fieldview_sandbox",
                    "walkthrough.index", "walkthrough.view"}
@@ -1232,6 +1247,54 @@ def ext_allowed(filename, allowed):
     return bool(filename and "." in filename and filename.rsplit(".", 1)[1].lower() in allowed)
 
 
+def clean_line(value, limit):
+    """One-line user text: drop control characters (CR/LF, tabs, NUL) and trim to a length limit."""
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or "")).strip()[:limit]
+
+
+UPLOAD_HEAD_BYTES = 8192
+_MARKUP_IN_TEXT = re.compile(rb"<\s*(?:!doctype|html|script|svg|iframe|object|embed)\b|javascript:", re.I)
+
+
+def upload_signature_ok(ext, head):
+    """Check an upload's first bytes against its extension.
+
+    Blocks disguised or suspicious files (an executable or web page renamed to
+    .pdf/.jpg/.mp4, HTML or script hidden in a .txt/.csv). Unknown types fail."""
+    ext = (ext or "").lower()
+    if ext == "pdf":
+        return head.startswith(b"%PDF-")
+    if ext in {"jpg", "jpeg"}:
+        return head.startswith(b"\xff\xd8\xff")
+    if ext == "png":
+        return head.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext == "webp":
+        return head.startswith(b"RIFF") and head[8:12] == b"WEBP"
+    if ext in {"tif", "tiff"}:
+        return head[:4] in {b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"}
+    if ext in {"zip", "docx", "xlsx"}:
+        return head[:4] in {b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"}
+    if ext == "glb":
+        return head.startswith(b"glTF")
+    if ext in {"mp4", "m4v", "mov"}:
+        return head[4:8] in {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip", b"pnot"}
+    if ext == "webm":
+        return head.startswith(b"\x1aE\xdf\xa3")
+    if ext == "avi":
+        return head.startswith(b"RIFF") and head[8:12] == b"AVI "
+    if ext in {"csv", "txt"}:
+        text = head
+        if head.startswith((b"\xff\xfe", b"\xfe\xff")):
+            text = head.decode("utf-16", "ignore").encode("utf-8", "ignore")
+        elif b"\x00" in head:
+            return False
+        return not _MARKUP_IN_TEXT.search(text)
+    return False
+
+
+DOWNLOAD_ONLY_EXTENSIONS = {"txt", "csv", "zip", "docx", "xlsx"}
+
+
 def video_signature_valid(stream, filename):
     """Require supported media container headers before saving uploaded files."""
     ext = extension(filename)
@@ -1454,6 +1517,15 @@ def aggregate_company_storage(company_ids):
 def save_upload(file_storage, *, replacing_size=0):
     """Save an uploaded file safely and return (filename, size, sha256)."""
     original = safe_name(file_storage.filename)
+    try:
+        head_stream = file_storage.stream
+        head_start = head_stream.tell()
+        head = head_stream.read(UPLOAD_HEAD_BYTES)
+        head_stream.seek(head_start)
+    except (AttributeError, OSError, ValueError) as exc:
+        raise ValueError("The upload could not be read.") from exc
+    if not upload_signature_ok(extension(original), head):
+        raise ValueError(f"This file does not match its .{extension(original) or 'unknown'} type, so it was blocked.")
     filename = unique_filename(original)
     destination = UPLOAD_DIR / filename
     company_id = None
@@ -1683,7 +1755,7 @@ def send_project_access_code_email(access, recipients, code, *, previous_message
         # one-click unsubscribe link.
         for recipient in recipients:
             message = EmailMessage()
-            message["Subject"] = f"Weekly project access code — {access.project}"
+            message["Subject"] = f"Weekly project access code — {clean_line(access.project, 160)}"
             message["From"] = os.environ.get("MAIL_FROM", "Capture IV <no-reply@captureiv.com>")
             message["To"] = recipient
             message["Message-ID"] = make_msgid(domain="captureiv.com")
@@ -1759,7 +1831,7 @@ def audit(action, resource_type="", resource_id="", detail=""):
             resource_type=resource_type,
             resource_id=str(resource_id),
             detail=detail[:4000],
-            ip_address=(request.headers.get("X-Forwarded-For", request.remote_addr) or "")[:80],
+            ip_address=(request.remote_addr or "")[:80],
         )
         db.session.add(entry)
         db.session.commit()
@@ -2609,6 +2681,8 @@ def login():
         username = request.form.get("username", "").strip().lower()
         password = request.form.get("password", "")
         user = User.query.filter(or_(User.username == username, User.email == username)).first()
+        if not user:
+            check_password_hash(DUMMY_PASSWORD_HASH, password)  # equal timing for unknown accounts
         if user and user.check_password(password):
             membership = CompanyMembership.query.filter_by(user_id=user.id).first()
             pending_subscription = None
@@ -2638,7 +2712,7 @@ def send_account_email(recipient, subject, body):
     if not host:
         return False
     message = EmailMessage()
-    message["Subject"] = subject
+    message["Subject"] = clean_line(subject, 250)
     message["From"] = os.environ.get("MAIL_FROM", "Capture IV <no-reply@captureiv.com>")
     message["To"] = recipient
     message["List-Unsubscribe"] = f"<{email_unsubscribe_url(recipient)}>"
@@ -4454,6 +4528,8 @@ def protected_file(filename):
     else:
         audit("stream", "file", safe, "Authenticated file access")
     content_type = mimetypes.guess_type(safe)[0] or "application/octet-stream"
+    if extension(safe) in DOWNLOAD_ONLY_EXTENSIONS:
+        download = True
     if is_r2_filename(safe):
         try:
             target = R2Storage().signed_download(
@@ -4539,7 +4615,7 @@ def fieldview_sandbox():
 @admin_required
 @company_feature_required("photos")
 def upload_project_photo_reference():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     photo = request.files.get("photo_reference")
     if not project or not photo or not photo.filename or extension(photo.filename) not in {"jpg", "jpeg", "png", "webp"}:
         flash("Choose a JPG, PNG, or WebP site image.", "error")
@@ -4646,7 +4722,7 @@ def save_project_photo_annotations():
 @upload_user_required
 @company_feature_required("photos")
 def upload_photo_pin_images():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     pin_id = request.form.get("pin_id", "").strip()
     if not project or not re.fullmatch(r"[A-Za-z0-9_-]{12,64}", pin_id):
         abort(400, "Choose a valid photo location")
@@ -4718,7 +4794,7 @@ def upload_photo_pin_images():
 @upload_user_required
 @company_feature_required("viewer_links")
 def create_project_access():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     if not project:
         abort(400, "Project is required")
     if not user_can_upload_project(project):
@@ -5282,7 +5358,7 @@ def abort_r2_upload(upload_id):
 @admin_required
 @company_feature_required("flight_scans")
 def upload_route_video():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     date_value = parse_date(request.form.get("date", ""))
     video = request.files.get("video")
     title = request.form.get("title", "").strip()[:200]
@@ -5334,7 +5410,7 @@ def upload_route_video():
 @admin_required
 @company_feature_required("site_maps")
 def upload_project_map():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     map_file = request.files.get("map_file")
     module = request.form.get("module", "image").strip()
     allowed = {"tif", "tiff"} if module == "ortho" else {"jpg", "jpeg", "png", "webp"}
@@ -5383,7 +5459,7 @@ def upload_project_map():
 @admin_required
 @company_feature_required("site_maps")
 def save_project_site_setup():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     module = request.form.get("module", "map").strip()
     address = request.form.get("address", "").strip()[:300]
     boundary_name = request.form.get("boundary_name", "").strip()[:160]
@@ -5442,7 +5518,7 @@ def save_project_site_setup():
 @admin_required
 @company_feature_required("site_maps")
 def save_project_flight_path():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     name = request.form.get("name", "").strip()[:160]
     label = request.form.get("label", "").strip()[:64]
     direction = request.form.get("direction", "Custom path").strip()[:40]
@@ -5521,7 +5597,7 @@ def delete_project_flight_path(path_id):
 @admin_required
 @company_feature_required("site_maps")
 def create_project_pin():
-    project = request.form.get("project", "").strip()[:160]
+    project = clean_line(request.form.get("project", ""), 160)
     label = request.form.get("label", "").strip()[:120]
     direction = request.form.get("direction", "").strip().upper()
     try:
@@ -6002,7 +6078,11 @@ def api_stats():
 @app.get("/api/audit")
 @admin_required
 def api_audit():
-    limit = min(max(int(request.args.get("limit", 100)), 1), 500)
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    limit = min(max(limit, 1), 500)
     rows = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(limit).all()
     return jsonify([{
         "id": r.id, "user_id": r.user_id, "action": r.action,
