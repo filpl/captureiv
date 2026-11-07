@@ -511,3 +511,6 @@ h1 em,.hero h1 em{color:#1f7bff !important}
 
 /* Platform: security panel as its own section near the end */
 .capture-security.wrap{margin-top:clamp(40px,6vw,72px);margin-bottom:clamp(40px,6vw,64px)}
+
+/* Pricing: small plan sub-label under the plan name */
+.package-card .package-subnote{margin:-2px 0 12px;color:#60737e;font-size:13px;font-weight:600;letter-spacing:.2px}
