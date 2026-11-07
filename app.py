@@ -2087,7 +2087,10 @@ def render_project_view(access):
         if not permissions:
             abort(403)
         return redirect(url_for("shared_project", token=token, tab="media"))
-    return render_template("project_view.html", project=access.project, code=access.code, share_token=token,
+    # Top-bar tabs for the client viewer: only what this project link permits.
+    viewer_tabs = [(key, label) for key, label in (("map", "Flight Scans"), ("media", "Media"), ("photos", "Photos"))
+                   if key in permissions]
+    return render_template("project_view.html", project=access.project, code=access.code, share_token=token, viewer_tabs=viewer_tabs,
                            flights=flights, day_flights=day_flights, dates=dates, docs=docs,
                            selected_date=selected_date, selected_flight=selected_flight, tab=tab,
                            site_map=site_map, photo_reference=photo_reference, site_reference=site_reference,

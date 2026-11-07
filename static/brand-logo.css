@@ -1,0 +1,17 @@
+/* Capture IV logo (shared by the app pages). The mark is the "C" of Capture.
+   Structural properties are !important so page styles for spans/b/small in
+   headers and footers cannot reshape the logo. */
+.civ-logo { display: inline-flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 0 !important; width: auto !important; height: auto !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; font: 800 20px/1 Manrope, 'Plus Jakarta Sans', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif; letter-spacing: -.035em !important; text-transform: none !important; white-space: nowrap !important; color: #0b1530; }
+.civ-logo--dark { color: #fff; }
+.civ-logo .civ-row { display: inline-flex !important; align-items: center !important; gap: .07em !important; height: auto !important; padding: 0 !important; border: 0 !important; background: none !important; font: inherit !important; letter-spacing: inherit !important; color: inherit !important; }
+.civ-logo .civ-mark { flex: none !important; display: block !important; width: .78em !important; height: .75em !important; margin: 0 !important; fill: #1f7bff; transform: translateY(.04em); }
+.civ-logo--dark .civ-mark { fill: #2f8cff; }
+.civ-logo .civ-word { display: inline !important; height: auto !important; padding: 0 !important; border: 0 !important; background: none !important; font: inherit !important; letter-spacing: inherit !important; color: inherit !important; text-transform: none !important; }
+.civ-logo .civ-word b { display: inline !important; height: auto !important; border: 0 !important; margin: 0 !important; padding: 0 !important; font: inherit !important; color: #1f7bff !important; }
+.civ-logo--dark .civ-word b { color: #2f8cff !important; }
+.civ-logo .civ-tag { display: block !important; margin: 6px 0 0 !important; padding: 0 !important; border: 0 !important; background: none !important; font: 700 8.5px/1 'DM Sans', Inter, system-ui, sans-serif !important; letter-spacing: .16em !important; text-transform: uppercase !important; color: inherit; opacity: .62; }
+.civ-logo .civ-sr { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; border: 0 !important; }
+.civ-footer-brand { display: grid; gap: 4px; }
+.civ-footer-brand .civ-logo { font-size: 15px; }
+.access-top .civ-logo { font-size: 22px; }
+.access-top .civ-tag { color: #cdd3d8; }

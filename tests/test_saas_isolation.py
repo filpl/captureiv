@@ -192,7 +192,7 @@ class TenantIsolationTests(unittest.TestCase):
         client = portal.app.test_client()
         page = client.get("/login", environ_base={"REMOTE_ADDR": remote_addr})
         self.assertIn(b"Sign in \xc2\xb7 Capture IV", page.data)
-        self.assertIn(b"Intelligence Visuals", page.data)
+        self.assertIn(b"Capture Intelligence Visualized", page.data)
         self.assertNotIn(b"Construction Flight Archive", page.data)
         csrf = re.search(rb'name="_csrf" value="([^\"]+)"', page.data).group(1).decode()
         for _ in range(15):
@@ -735,9 +735,9 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(unlocked.status_code, 302)
         viewer_page = visitor.get(unlocked.headers["Location"])
         self.assertEqual(viewer_page.status_code, 200)
-        self.assertIn(b"Drone footage", viewer_page.data)
+        self.assertIn(b"All flights", viewer_page.data)
         self.assertNotIn(b"Documents", viewer_page.data)
-        self.assertIn(b"Map", viewer_page.data)
+        self.assertIn(b"Flight Scans", viewer_page.data)
         self.assertIn(b"Photos", viewer_page.data)
 
         with portal.app.app_context():
