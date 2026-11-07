@@ -457,24 +457,24 @@ h1 em,.hero h1 em{color:#1f7bff !important}
 .home-action-sound[aria-pressed="true"] .wave{display:block}
 @media(max-width:620px){.home-action-sound{right:10px;bottom:10px;padding:7px 11px 7px 9px;font-size:11px}}
 
-.field-capture{position:relative;background:linear-gradient(180deg,#0a1322,#0c1830 60%,#0a1526);color:#eaf1fb;padding:clamp(56px,8vw,104px) 0;overflow:hidden}
-.field-capture:before{content:'';position:absolute;inset:0;background-image:linear-gradient(#ffffff0a 1px,transparent 1px),linear-gradient(90deg,#ffffff0a 1px,transparent 1px);background-size:48px 48px;opacity:.5;-webkit-mask-image:radial-gradient(72% 70% at 72% 42%,#000,transparent);mask-image:radial-gradient(72% 70% at 72% 42%,#000,transparent);pointer-events:none}
+.field-capture{position:relative;background:#fff;color:#172a35;border-bottom:1px solid #dce7ea;padding:clamp(56px,8vw,104px) 0;overflow:hidden}
+.field-capture:before{content:'';position:absolute;inset:0;background-image:linear-gradient(#1769d20d 1px,transparent 1px),linear-gradient(90deg,#1769d20d 1px,transparent 1px);background-size:48px 48px;opacity:.5;-webkit-mask-image:radial-gradient(72% 70% at 72% 42%,#000,transparent);mask-image:radial-gradient(72% 70% at 72% 42%,#000,transparent);pointer-events:none}
 .field-capture .wrap{position:relative}
 .field-capture-inner{display:grid;grid-template-columns:1fr auto;gap:clamp(28px,5vw,72px);align-items:center}
 .field-capture-copy{max-width:540px}
-.field-capture-copy .eyebrow{color:#8fb4ff}
-.field-capture-copy .eyebrow .dot{background:#4b86ff}
-.field-capture-copy h2{color:#fff;font-size:clamp(30px,4vw,50px);letter-spacing:-1.4px;line-height:1.06;margin:16px 0 0}
-.field-capture-copy>p{color:#a9bcd6;font-size:16px;line-height:1.65;margin:18px 0 0}
+.field-capture-copy .eyebrow{color:#1769d2}
+.field-capture-copy .eyebrow .dot{background:#1769d2}
+.field-capture-copy h2{color:#142733;font-size:clamp(30px,4vw,50px);letter-spacing:-1.4px;line-height:1.06;margin:16px 0 0}
+.field-capture-copy>p{color:#5c6c76;font-size:16px;line-height:1.65;margin:18px 0 0}
 .field-capture-points{list-style:none;margin:22px 0 0;padding:0;display:grid;gap:11px}
-.field-capture-points li{position:relative;padding-left:28px;color:#d4e0f2;font-size:15px;line-height:1.5}
+.field-capture-points li{position:relative;padding-left:28px;color:#2c3e48;font-size:15px;line-height:1.5}
 .field-capture-points li:before{content:'';position:absolute;left:0;top:4px;width:17px;height:17px;border-radius:50%;background:#1769d2;box-shadow:0 0 0 4px #1769d222}
 .field-capture-points li:after{content:'';position:absolute;left:5px;top:8px;width:6px;height:3px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg)}
-.field-capture-cta{display:inline-flex;align-items:center;gap:7px;margin-top:26px;color:#fff;font-weight:600;font-size:15px;text-decoration:none;border-bottom:2px solid #1769d2;padding-bottom:3px;width:fit-content}
-.field-capture-cta b{color:#6aa6ff}
+.field-capture-cta{display:inline-flex;align-items:center;gap:7px;margin-top:26px;color:#142733;font-weight:600;font-size:15px;text-decoration:none;border-bottom:2px solid #1769d2;padding-bottom:3px;width:fit-content}
+.field-capture-cta b{color:#1769d2}
 .field-capture-media{margin:0}
-.field-capture-media img{display:block;height:min(600px,74vh);width:auto;max-width:100%;object-fit:cover;border-radius:16px;border:1px solid #223049;box-shadow:0 40px 90px #01050e88}
-.field-capture-media figcaption{margin-top:12px;text-align:center;color:#7f93ad;font-size:12px;letter-spacing:.2px}
+.field-capture-media img{display:block;height:min(600px,74vh);width:auto;max-width:100%;object-fit:cover;border-radius:16px;border:1px solid #dce7ea;box-shadow:0 30px 70px #17303b29}
+.field-capture-media figcaption{margin-top:12px;text-align:center;color:#6b7c85;font-size:12px;letter-spacing:.2px}
 @media(max-width:860px){.field-capture-inner{grid-template-columns:1fr;gap:26px}.field-capture-media img{height:auto;width:100%;max-height:520px;object-fit:cover}.field-capture-copy{max-width:none}}
 
 .cookie-bar{position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;display:flex;justify-content:center;pointer-events:none;opacity:0;transform:translateY(14px);transition:opacity .3s ease,transform .3s ease}
