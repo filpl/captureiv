@@ -508,3 +508,6 @@ h1 em,.hero h1 em{color:#1f7bff !important}
 .home-hero .intro-strip p{font-size:clamp(15px,1.25vw,18px);line-height:1.6;margin-top:12px}
 @media(max-width:1000px){.home-hero .hero-copy{flex-direction:column;align-items:flex-start;gap:28px}.home-hero h1{font-size:clamp(48px,10vw,96px)}}
 @media(max-width:760px){.home-hero .hero-top{gap:22px;margin-bottom:36px}.home-hero h1{font-size:clamp(46px,13vw,70px);letter-spacing:-2.6px}.home-hero .hero-copy p{font-size:17px}.home-hero .actions .button{font-size:15px;padding:15px 20px}.home-hero .intro-strip article,.home-hero .intro-strip article+article{padding:20px 0}.home-hero .intro-strip h3{font-size:21px}.home-hero .intro-strip p{font-size:15px}.home-hero .intro-strip article:first-child{border-top:0}.home-hero .eyebrow{font-size:10px;letter-spacing:1.8px}}
+
+/* Platform: security panel as its own section near the end */
+.capture-security.wrap{margin-top:clamp(40px,6vw,72px);margin-bottom:clamp(40px,6vw,64px)}
