@@ -1,6 +1,14 @@
 const inquiryTypes=new Set(['Platform Demo','Plans & Pricing','Project Support','Capture & Scanning','General Inquiry']);
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 
+// IPv6 clients share one rate-limit bucket per /64, so rotating addresses inside it does not bypass the limit.
+export function rateBucket(ip){
+  if(!ip.includes(':'))return ip;
+  const [head,tail='']=ip.split('::');const a=head?head.split(':'):[],b=tail?tail.split(':'):[];
+  const full=ip.includes('::')?[...a,...Array(Math.max(0,8-a.length-b.length)).fill('0'),...b]:a;
+  return full.slice(0,4).map(x=>(x||'0').toLowerCase().replace(/^0+(?=.)/,'')).join(':')+'::/64';
+}
+
 export async function contact(request,env){
   if(request.method!=='POST')return json({error:'Method not allowed.'},405);
   const origin=request.headers.get('Origin');
@@ -20,11 +28,15 @@ export async function contact(request,env){
   const limits={firstName:80,lastName:80,email:254,company:180,inquiryType:80,message:5000};const fields={};
   for(const [key,max] of Object.entries(limits)){
     if(typeof body[key]!=='string'||!body[key].trim()||body[key].trim().length>max)return json({error:'Please complete all fields within their length limits.'},400);
-    fields[key]=body[key].trim();
+    // Strip hidden control characters; only the message keeps line breaks and tabs.
+    const cleaned=key==='message'?body[key].replace(/\r\n?/g,'\n').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g,''):body[key].replace(/[\x00-\x1f\x7f]+/g,' ');
+    fields[key]=cleaned.trim();
+    if(!fields[key])return json({error:'Please complete all fields within their length limits.'},400);
   }
+  if(/[<>]/.test(fields.firstName+fields.lastName+fields.company+fields.email))return json({error:'Names, company and email cannot contain < or > characters.'},400);
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email)||fields.message.length<10||!inquiryTypes.has(fields.inquiryType))return json({error:'Please enter a valid email, inquiry type and message of at least 10 characters.'},400);
   if(!env.DB)return json({error:'Inquiry saving is temporarily unavailable. Please try again later.'},503);
-  const rateSource=request.headers.get('CF-Connecting-IP')||'unknown';
+  const rateSource=rateBucket(request.headers.get('CF-Connecting-IP')||'unknown');
   const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('construct-iv-contact:'+rateSource));
   const rateKey=Array.from(new Uint8Array(digest),x=>x.toString(16).padStart(2,'0')).join('');
   const id=crypto.randomUUID();const now=Date.now();

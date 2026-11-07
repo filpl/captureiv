@@ -21,16 +21,17 @@ const contactSource=fs.readFileSync('worker/contact.js','utf8').replace('export 
 const router=`
 const platformLoginURL=${JSON.stringify(loginURL)};
 const aliases={'/':'/index.html','/platform':'/platform.html','/solutions':'/solutions.html','/clients':'/clients.html','/about':'/about.html','/about-us':'/about.html','/contact':'/contact.html','/pricing':'/pricing.html','/portal':'/portal.html'};
+const security={'X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN','Strict-Transport-Security':'max-age=31536000','Content-Security-Policy':\"frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'\"};
 export default {async fetch(request,env){
  const url=new URL(request.url);
  if(url.pathname==='/portal')return Response.redirect(new URL(platformLoginURL,request.url).href,302);
  if(url.pathname==='/api/contact')return contact(request,env);
- if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405,headers:{Allow:'GET, HEAD'}});
+ if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405,headers:{...security,Allow:'GET, HEAD'}});
  let key=aliases[url.pathname.replace(/\\/$/,'')||'/']||url.pathname;
  const asset=assets[key];
- if(!asset)return new Response('Page not found. Return to Capture IV at /.',{status:404,headers:{'Content-Type':'text/plain; charset=utf-8'}});
+ if(!asset)return new Response('Page not found. Return to Capture IV at /.',{status:404,headers:{...security,'Content-Type':'text/plain; charset=utf-8'}});
  const bytes=Uint8Array.from(atob(asset.base64),c=>c.charCodeAt(0));
- return new Response(request.method==='HEAD'?null:bytes,{headers:{'Content-Type':asset.type,'Cache-Control':key.endsWith('.html')?'no-cache':'public, max-age=3600','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN'}});
+ return new Response(request.method==='HEAD'?null:bytes,{headers:{'Content-Type':asset.type,'Cache-Control':key.endsWith('.html')?'no-cache':'public, max-age=3600',...security}});
 }};
 `;
 const worker='const assets='+JSON.stringify(assets)+';\n'+contactSource+'\n'+router;
