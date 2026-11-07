@@ -1273,6 +1273,26 @@ class TenantIsolationTests(unittest.TestCase):
             portal.db.session.get(portal.User, self.user_a_id).platform_owner = False
             portal.db.session.commit()
 
+    def test_annual_billing_is_hidden_and_rejected_until_enabled(self):
+        client = portal.app.test_client()
+        with patch.dict(os.environ, {"ANNUAL_BILLING_ENABLED": ""}):
+            page = client.get("/register?plan=basic")
+            self.assertNotIn(b'value="annual"', page.data)
+            self.assertIn(b'value="monthly"', page.data)
+            token = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
+            with portal.app.app_context():
+                plan_id = portal.SubscriptionPlan.query.filter_by(name="Basic").first().id
+            forced = client.post("/register", data={
+                "_csrf": token, "company_name": "Annual Co", "email": "annual-hidden@example.test",
+                "password": "test-password-123", "confirm_password": "test-password-123",
+                "plan_id": str(plan_id), "billing_interval": "annual", "accept_policies": "yes"})
+            self.assertEqual(forced.status_code, 400)
+            self.assertIn(b"Annual billing isn&#39;t available right now", forced.data)
+            with portal.app.app_context():
+                self.assertIsNone(portal.User.query.filter_by(email="annual-hidden@example.test").first())
+        with patch.dict(os.environ, {"ANNUAL_BILLING_ENABLED": "1"}):
+            self.assertIn(b'value="annual"', client.get("/register?plan=basic").data)
+
     def test_registration_remains_pending_without_stripe_confirmation(self):
         client = portal.app.test_client()
         page = client.get("/register?plan=basic")

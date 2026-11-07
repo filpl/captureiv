@@ -236,6 +236,14 @@ EMAIL_OPTOUT_SCHEMA_REVISION = "0023_email_opt_out"
 SHARE_LINK_CODE_SCHEMA_REVISION = "0024_share_link_code_mode"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
+
+
+def annual_billing_enabled():
+    """Annual sign-up is hidden until ANNUAL_BILLING_ENABLED is turned on.
+
+    Existing annual subscriptions, refund reviews and the owner console are
+    unaffected; this only controls whether new customers can choose annual."""
+    return os.environ.get("ANNUAL_BILLING_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 BASIC_PROJECT_LIMIT = 1
 BASIC_ACCOUNT_LIMIT = 2
 BASIC_STORAGE_LIMIT_BYTES = 1_000_000_000_000  # 1 TB in decimal bytes.
@@ -967,6 +975,7 @@ def legal_url(slug):
 
 
 app.jinja_env.globals["legal_url"] = legal_url
+app.jinja_env.globals["annual_billing_enabled"] = annual_billing_enabled
 
 
 def legal_details():
@@ -2668,6 +2677,8 @@ def register():
             flash("The passwords do not match.", "error")
         elif request.form.get("billing_interval", "monthly") not in {"monthly", "annual"}:
             flash("Choose monthly or annual billing.", "error")
+        elif request.form.get("billing_interval") == "annual" and not annual_billing_enabled():
+            flash("Annual billing isn't available right now. Choose monthly billing.", "error")
         elif (request.form.get("billing_interval") == "annual" and
               (not plan or not plan.annual_amount_cents or not plan.stripe_annual_price_id)):
             flash("Annual billing is not available until its price is approved and configured.", "error")

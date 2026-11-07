@@ -13,7 +13,7 @@
     <label>Plan<select name="plan_id" required>{% for plan in plans %}<option value="{{ plan.id }}" {% if requested_plan == plan.name|lower %}selected{% endif %}>{{ plan.name }} — {% if plan.name == 'Basic' %}$399 / month · 1 project · 2 accounts · 1 TB{% else %}{{ plan.description }}{% endif %}</option>{% endfor %}</select></label>
     <fieldset class="saas-interval"><legend>Billing interval</legend>
       <label><input type="radio" name="billing_interval" value="monthly" checked> Monthly · $399</label>
-      <label><input type="radio" name="billing_interval" value="annual" {% if not basic or not basic.annual_amount_cents or not basic.stripe_annual_price_id %}disabled{% endif %}> Annual{% if not basic or not basic.annual_amount_cents or not basic.stripe_annual_price_id %} · not yet available{% else %} · ${{ '%.2f'|format(basic.annual_amount_cents / 100) }}{% endif %}</label>
+      {% if annual_billing_enabled() %}<label><input type="radio" name="billing_interval" value="annual" {% if not basic or not basic.annual_amount_cents or not basic.stripe_annual_price_id %}disabled{% endif %}> Annual{% if not basic or not basic.annual_amount_cents or not basic.stripe_annual_price_id %} · not yet available{% else %} · ${{ '%.2f'|format(basic.annual_amount_cents / 100) }}{% endif %}</label>{% endif %}
     </fieldset>
     <label>Password<input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
     <label>Confirm password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>
