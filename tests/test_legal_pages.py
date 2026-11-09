@@ -41,12 +41,12 @@ class LegalPagesTests(unittest.TestCase):
         self.assertIn(b"<code>session</code>", page)
         self.assertIn(b"do not use advertising or analytics cookies", page)
 
-    def test_no_private_company_name_and_draft_notice_until_approved(self):
+    def test_no_private_company_name_and_no_draft_banner(self):
         client = portal.app.test_client()
         for slug in portal.LEGAL_PAGES:
             page = client.get(f"/legal/{slug}").data
             self.assertNotIn(b"HERSHEY", page.upper())
-            self.assertIn(b"Draft for owner and legal review", page)
+            self.assertNotIn(b"Draft for owner and legal review", page)
         with patch.dict(os.environ, {"LEGAL_TERMS_APPROVED": "1", "LEGAL_ENTITY_NAME": "Example Operator LLC",
                                      "LEGAL_GOVERNING_LAW": "the State of Example"}):
             page = client.get("/legal/terms").data

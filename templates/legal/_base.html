@@ -6,7 +6,7 @@
 <header class="legal-top"><a class="legal-brand" href="{{ url_for('index') }}">Capture <span>IV</span></a>
 <nav aria-label="Legal pages">{% for key, name in legal.pages.items() %}<a href="{{ legal_url(key) }}"{% if slug == key %} aria-current="page"{% endif %}>{{ name.split(' ')[0] if key != 'billing' else 'Billing' }}</a>{% endfor %}</nav></header>
 <main id="main-content" class="legal-main">
-{% if not legal.approved %}<aside class="legal-draft" role="note"><strong>Draft for owner and legal review.</strong> This page describes how Capture IV works today and the policies the Platform Owner has approved so far. It has not yet been approved as final legal terms.</aside>{% endif %}
+
 <article class="legal-doc">
 <p class="legal-eyebrow">Capture IV{% if legal.entity != "Capture IV" %} · {{ legal.entity }}{% endif %}</p>
 <h1>{{ title }}</h1>
