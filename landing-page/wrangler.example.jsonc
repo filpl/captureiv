@@ -1,13 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "capture-iv-landing-page",
-  "main": "dist/server/index.js",
+  // Pages, images and video are served from a private R2 bucket (binding SITE).
+  "main": "worker/assets-router.js",
   "compatibility_date": "2026-10-19",
-  "build": {"command": "npm run build"},
+  "account_id": "REPLACE_WITH_YOUR_ACCOUNT_ID",
+  "r2_buckets": [{"binding": "SITE", "bucket_name": "capture-iv-site"}],
   "d1_databases": [{
     "binding": "DB",
     "database_name": "construct-iv-inquiries",
     "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
     "migrations_dir": "drizzle"
-  }]
+  }],
+  "vars": {"PLATFORM_LOGIN_URL": "https://app.captureiv.com/login"},
+  "routes": [
+    {"pattern": "captureiv.com", "custom_domain": true},
+    {"pattern": "www.captureiv.com", "custom_domain": true}
+  ]
 }

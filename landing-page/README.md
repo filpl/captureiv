@@ -35,6 +35,18 @@ The build produces a standalone Cloudflare Worker ESM file at `dist/server/index
 
 The source assumes it is served at the root of its marketing hostname. A `/landing-page/` URL prefix needs route and asset-path adaptation; the GitHub folder name is source organization, not a required URL prefix.
 
+### Hosted deployment (captureiv.com)
+
+The live site runs as the `capture-iv-landing-page` Worker with custom domains `captureiv.com` and `www.captureiv.com`. Pages, images and the walkthrough video are stored in the private R2 bucket `capture-iv-site` and served by `worker/assets-router.js`, which also handles `POST /api/contact` (D1 `construct-iv-inquiries`), the `/portal` redirect and security headers. To publish changes:
+
+```sh
+npm run build:assets                        # web/ -> dist/assets with platform URLs filled in
+node scripts/upload-site-r2.mjs             # needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN
+npx wrangler deploy --config wrangler.jsonc # only needed when worker code or bindings change
+```
+
+Roll back from the Cloudflare dashboard (Workers → capture-iv-landing-page → Deployments). The platform (`app.captureiv.com`) is a separate Render service reached by a DNS-only CNAME, with its uploads in the private R2 bucket `construct-iv-media`.
+
 For Cloudflare, copy `wrangler.example.jsonc` to `wrangler.jsonc`, set your D1 database ID, and use your approved Wrangler installation. Apply the SQL migration before deployment:
 
 ```sh

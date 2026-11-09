@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:assets": "node scripts/build-assets.mjs",
     "test": "node scripts/validate-artifact.mjs && node scripts/test-site.mjs && node scripts/test-config.mjs && node scripts/test-local-contact-store.mjs",
     "preview": "node scripts/preview.mjs"
   }
