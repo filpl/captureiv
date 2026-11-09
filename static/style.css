@@ -107,3 +107,15 @@
 .access-team-hint{margin:10px 0 0;font-size:12px;color:#55657a}
 .access-trust{display:inline-flex;align-items:center;gap:7px;margin:16px 0 2px;padding:6px 15px;border:1px solid #d6e1ee;border-radius:999px;background:#f1f6fc;color:#2c4d78;font:600 11.5px 'DM Sans',sans-serif;letter-spacing:.03em}
 .access-trust svg{width:14px;height:14px}
+
+/* Get started: Pilot / Enterprise choice */
+.plan-choice{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:6px 0 22px}
+.plan-option{display:flex;flex-direction:column;gap:4px;padding:16px;border:1.5px solid #d6e0e4;border-radius:12px;background:#fff;color:inherit;text-decoration:none;transition:border-color .15s,box-shadow .15s}
+.plan-option strong{font-size:18px}
+.plan-option-price{font-weight:600;font-size:14px}
+.plan-option small{color:#60737e;font-size:12.5px;line-height:1.45}
+.plan-option-tag{align-self:flex-start;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#60737e;background:#eef2f4;border-radius:999px;padding:3px 8px}
+.plan-option.is-selected{border-color:#1769d2;box-shadow:0 0 0 3px #1769d21f}
+.plan-option.is-selected .plan-option-tag{background:#1769d2;color:#fff}
+a.plan-option:hover,a.plan-option:focus-visible{border-color:#1769d2;box-shadow:0 6px 18px #17303b14}
+@media(max-width:480px){.plan-choice{grid-template-columns:1fr}}
