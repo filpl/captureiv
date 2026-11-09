@@ -2399,7 +2399,13 @@ def index():
             session["viewer_token"] = access.share_token
             return redirect(url_for("shared_project", token=access.share_token))
         flash("That project code was not recognized. Check the four letters and try again.", "error")
-    return render_template("access.html")
+        return render_template("access.html")
+    # The bare app address no longer shows the old 4-letter code page: signed-in
+    # users go to their workspace, everyone else to the marketing homepage.
+    # Clients open projects from their /share/<token> link.
+    if current_user.is_authenticated:
+        return redirect(url_for("platform_owner_dashboard" if current_user.platform_owner else "dashboard"))
+    return redirect(app.config.get("MARKETING_SITE_URL") or "https://captureiv.com")
 
 
 @app.route("/share/<token>", methods=["GET", "POST"])

@@ -1002,7 +1002,7 @@ class TenantIsolationTests(unittest.TestCase):
             code, company_id = access.code, company.id
 
         visitor = portal.app.test_client()
-        landing = visitor.get("/")
+        landing = visitor.get("/login")
         visitor_csrf = re.search(rb'name="_csrf" value="([^\"]+)"', landing.data).group(1).decode()
         unlocked = visitor.post("/", data={"_csrf": visitor_csrf, "code": code})
         self.assertEqual(unlocked.status_code, 302)
@@ -1272,6 +1272,13 @@ class TenantIsolationTests(unittest.TestCase):
             portal.db.session.commit()
             portal.db.session.get(portal.User, self.user_a_id).platform_owner = False
             portal.db.session.commit()
+
+    def test_app_root_sends_visitors_to_the_marketing_homepage(self):
+        response = portal.app.test_client().get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"].rstrip("/"), portal.app.config["MARKETING_SITE_URL"].rstrip("/"))
+        terms = portal.app.test_client().get("/legal/terms").get_data(as_text=True)
+        self.assertIn(f'class="legal-brand" href="{portal.app.config["MARKETING_SITE_URL"]}/"', terms)
 
     def test_uploads_must_match_their_file_type(self):
         ok = portal.upload_signature_ok

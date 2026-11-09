@@ -67,7 +67,7 @@ class LegalPagesTests(unittest.TestCase):
 
     def test_signup_checkout_and_viewer_links_point_to_app_legal_pages(self):
         client = portal.app.test_client()
-        for path in ("/register", "/"):
+        for path in ("/register", "/login"):
             html = client.get(path).get_data(as_text=True)
             self.assertIn("/legal/terms", html, path)
             self.assertIn("/legal/privacy", html, path)
