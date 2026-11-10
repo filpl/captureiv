@@ -32,7 +32,7 @@ from flask_login import (
     current_user
 )
 from sqlalchemy import inspect, text, or_, func, event
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import with_loader_criteria, Session
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -2249,7 +2249,7 @@ def apply_site_boundary_name_migration():
             ))
     if not db.session.get(SchemaMigration, SITE_BOUNDARY_NAME_SCHEMA_REVISION):
         db.session.add(SchemaMigration(revision=SITE_BOUNDARY_NAME_SCHEMA_REVISION))
-        db.session.commit()
+    db.session.commit()  # never leave the ALTER's table lock open for later migrations
 
 
 def apply_share_keyword_migration():
@@ -2264,6 +2264,10 @@ def apply_share_keyword_migration():
             db.session.execute(text(
                 'ALTER TABLE "project_access" ADD COLUMN "access_keyword" VARCHAR(80) NOT NULL DEFAULT \'\''
             ))
+    # Commit before create_all: it runs on a separate connection, and the new
+    # share_access_otp table references project_access. On PostgreSQL an
+    # uncommitted ALTER here would block that CREATE TABLE forever.
+    db.session.commit()
     db.create_all()  # creates share_access_otp if it does not exist yet
     db.session.add(SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION))
     db.session.commit()
@@ -6171,7 +6175,32 @@ def reset_platform_owner_command():
 @app.cli.command("init-db")
 def init_db_command():
     """Apply additive compatibility migrations and create initial local defaults."""
-    init_db()
+    if db.engine.dialect.name != "postgresql":
+        init_db()
+        print("Database initialization complete.")
+        return
+    # A waiting ALTER TABLE queues every later query on that table behind it, so
+    # live requests stall for as long as a migration waits. Keep each wait short
+    # and retry: every migration step is idempotent and commits as it goes.
+    @event.listens_for(db.engine, "connect")
+    def _migration_lock_timeout(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("SET lock_timeout = '5s'")
+        cursor.close()
+        dbapi_connection.commit()  # keep the setting even if a later transaction rolls back
+    db.engine.dispose()
+    attempts = 12
+    for attempt in range(1, attempts + 1):
+        try:
+            init_db()
+            break
+        except OperationalError as exc:
+            if "lock timeout" not in str(exc).lower() or attempt == attempts:
+                raise
+            db.session.rollback()
+            db.session.remove()
+            print(f"Database busy (attempt {attempt}/{attempts}); retrying migrations shortly.")
+            time.sleep(min(30, 2 * attempt))
     print("Database initialization complete.")
 
 
