@@ -1,0 +1,75 @@
+{% extends '_media_share_base.html' %}
+{% block title %}Media library{% endblock %}
+{% block head_extra %}{% if tab == 'map' %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}?v=1"><link rel="stylesheet" href="{{ url_for('static', filename='project-viewer.css') }}?v=6">{% endif %}{% endblock %}
+{% block top_meta %}<span class="ms-hide-sm">{{ company.name if company else '' }}</span><span class="ms-badge"><i></i>Shared library</span>{% endblock %}
+{% block body %}
+<main class="ms-main">
+  <div class="ms-head">
+    <div><p class="ms-eyebrow">MEDIA LIBRARY</p><h1>{{ company.name if company else 'Project media' }}</h1><p class="ms-sub">{{ videos|length }} video{{ '' if videos|length == 1 else 's' }}{% if show_map %} · flight map for {{ share.map_project }}{% endif %}</p></div>
+    {% if show_map %}<nav class="ms-tabs" aria-label="Views"><a href="{{ url_for('media_library.shared_library', token=share.token) }}" class="{{ 'is-active' if tab == 'media' }}">Media</a><a href="{{ url_for('media_library.shared_library', token=share.token, tab='map') }}" class="{{ 'is-active' if tab == 'map' }}">Flight map</a></nav>{% endif %}
+  </div>
+
+  {% if tab == 'media' %}
+  {% if videos %}
+  <div class="ms-toolbar" role="group" aria-label="Filter by tag">
+    <button type="button" class="ms-chip is-active" data-tag="">All</button>
+    {% for t in tags %}<button type="button" class="ms-chip" data-tag="{{ t|lower }}">{{ t }}</button>{% endfor %}
+    <input class="ms-search" type="search" placeholder="Search videos…" aria-label="Search videos" id="ms-search">
+  </div>
+  <div class="ms-grid" id="ms-grid">
+    {% for v in videos %}
+    <article class="ms-tile" data-tags="{{ v.tag_list|map('lower')|join('|') }}" data-title="{{ v.title|lower }}">
+      <button type="button" class="ms-tile-open" data-play="{{ url_for('media_library.shared_library_play', token=share.token, video_id=v.id) }}" data-name="{{ v.title }}"
+              data-meta="{{ v.project }} · {{ v.uploaded_at.strftime('%b %d, %Y') }}{% if v.tag_list %} · {{ v.tag_list|join(', ') }}{% endif %}">
+        <span class="ms-thumb"><video muted preload="metadata" playsinline src="{{ url_for('media_library.shared_library_file', token=share.token, video_id=v.id) }}#t=0.5"></video></span>
+        <span class="ms-tile-body"><strong>{{ v.title }}</strong><span class="ms-tile-meta">{{ v.project }} · {{ v.uploaded_at.strftime('%b %d, %Y') }} · {{ (v.file_size / 1048576)|round(1) }} MB</span>{% if v.tag_list %}<span class="ms-tags">{% for t in v.tag_list %}<span class="ms-tag">{{ t }}</span>{% endfor %}</span>{% endif %}</span>
+      </button>
+      <div class="ms-tile-foot"><a class="ms-dl" href="{{ url_for('media_library.shared_library_download', token=share.token, video_id=v.id) }}" download><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Download</a></div>
+    </article>
+    {% endfor %}
+  </div>
+  <p class="ms-empty" id="ms-none" hidden>No videos match this filter.</p>
+  {% else %}<p class="ms-empty">No videos have been added to this library yet.</p>{% endif %}
+  <dialog class="ms-dialog" id="ms-dialog" aria-labelledby="ms-dialog-title">
+    <div class="ms-dialog-head"><div><h2 id="ms-dialog-title"></h2><p id="ms-dialog-meta"></p></div><button type="button" class="ms-close" id="ms-close" aria-label="Close">×</button></div>
+    <div class="ms-frame" id="ms-dialog-frame" hidden></div>
+    <video controls playsinline preload="metadata" id="ms-dialog-video" hidden></video>
+    <div class="ms-dialog-foot"><a class="ms-btn" id="ms-dialog-download" href="#" download><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Download original</a></div>
+  </dialog>
+  {% else %}
+  <form class="ms-map-bar" method="get" id="ms-date-form">
+    <input type="hidden" name="tab" value="map">
+    <label>Date <select name="date" data-autosubmit>{% for d in dates %}<option value="{{ d.isoformat() }}" {% if d == selected_date %}selected{% endif %}>{{ d.strftime('%b %d, %Y') }}</option>{% endfor %}{% if not dates %}<option>No flights yet</option>{% endif %}</select></label>
+    <noscript><button class="ms-btn">Show</button></noscript>
+  </form>
+  <div class="ms-map-wrap">
+    <div class="ms-map">
+      <div id="viewer-site-map" data-module="{{ site_module }}" data-center-lat="{{ center_lat }}" data-center-lng="{{ center_lng }}" data-zoom="{{ zoom }}" data-image-url="{{ site_image_url }}" data-ortho-url="{{ site_ortho_url }}" data-date="{{ selected_date.isoformat() }}">
+        <div class="stage-toolbar"><span class="stage-label">{{ 'ORTHOMOSAIC' if site_module == 'ortho' else ('SITE IMAGE' if site_module == 'image' else 'SITE OVERVIEW') }}</span><button id="viewer-layer-toggle" class="map-toggle" type="button" {% if site_module != 'map' %}hidden{% endif %}>Satellite</button></div>
+        <div id="viewer-live-map" aria-label="Project site and flight routes"></div>
+        <p class="ms-map-empty" id="viewer-map-empty" hidden>The site image isn't available.</p>
+      </div>
+    </div>
+    <aside class="ms-side">
+      <h2>Flights on this date</h2>
+      {% for f in day_flights %}<a class="ms-flight{% if flight and flight.id == f.id %} is-active{% endif %}" href="{{ url_for('media_library.shared_library', token=share.token, tab='map', date=selected_date.isoformat(), flight=f.id) }}"><strong>{{ f.title }}</strong><small>{{ f.direction }}{% if f.area %} · {{ f.area }}{% endif %}</small></a>{% else %}<p class="ms-sub">No flight videos on this date. Routes still show on the map.</p>{% endfor %}
+    </aside>
+  </div>
+  {% if flight %}
+  <section class="ms-flight-player" id="flight-player" data-scroll-into-view>
+    <p class="ms-eyebrow">FLIGHT · {{ flight.date.strftime('%b %d, %Y') }}</p><h1>{{ flight.title }}</h1>
+    <div class="ms-player"><video controls playsinline preload="metadata" src="{{ flight_src }}"></video></div>
+    <div class="ms-actions"><a class="ms-btn" href="{{ flight_download }}" download><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Download original</a></div>
+  </section>
+  {% endif %}
+  <script id="viewer-flight-paths" type="application/json">{{ flight_paths|tojson }}</script>
+  <script id="viewer-flight-paths-by-date" type="application/json">{{ paths_by_date|tojson }}</script>
+  <script id="viewer-map-pins" type="application/json">{{ map_pins|tojson }}</script>
+  <script src="{{ url_for('static', filename='media-share-map-data.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='vendor/georaster.browser.bundle.min.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='vendor/georaster-layer-for-leaflet.min.js') }}?v=1"></script>
+  <script src="{{ url_for('static', filename='project-viewer-map.js') }}?v=14"></script>
+  {% endif %}
+</main>
+{% endblock %}

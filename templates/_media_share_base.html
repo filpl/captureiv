@@ -1,0 +1,21 @@
+{% from '_logo.html' import civ_logo %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow"><meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>{% block title %}Shared media{% endblock %} · Capture IV</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='brand-logo.css') }}?v=1">
+  {% block head_extra %}{% endblock %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='media-share.css') }}?v=3">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+</head>
+<body class="ms">
+  <header class="ms-top">
+    <a class="ms-brand" href="{{ config.get('MARKETING_SITE_URL', 'https://captureiv.com') }}/" aria-label="Capture IV home" rel="noopener">{{ civ_logo('light') }}</a>
+    <div class="ms-top-meta">{% block top_meta %}<span class="ms-badge"><i></i>Shared securely</span>{% endblock %}</div>
+  </header>
+  {% block body %}{% endblock %}
+  <footer class="ms-foot">Shared with Capture IV · View-only link{% if share is defined and share and share.expires_at %} · Available until {{ share.expires_at.strftime('%b %d, %Y') }}{% endif %}</footer>
+  <script src="{{ url_for('static', filename='media-share.js') }}?v=1"></script>
+</body>
+</html>

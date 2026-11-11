@@ -27,8 +27,8 @@
     });
   }
 
-  async function uploadFile(file, metadata, { csrf, onProgress = () => {} }) {
-    const state = await api('/admin/r2-upload/start', csrf, {
+  async function uploadFile(file, metadata, { csrf, onProgress = () => {}, baseUrl = '/admin/r2-upload' }) {
+    const state = await api(`${baseUrl}/start`, csrf, {
       ...metadata,
       filename: file.name,
       size: file.size,
@@ -50,7 +50,7 @@
       const start = (partNumber - 1) * state.partSize;
       const end = Math.min(file.size, start + state.partSize);
       const blob = file.slice(start, end);
-      const signed = await api(`/admin/r2-upload/${encodeURIComponent(state.uploadId)}/part-url`, csrf,
+      const signed = await api(`${baseUrl}/${encodeURIComponent(state.uploadId)}/part-url`, csrf,
         { partNumber });
       let partLoaded = 0;
       await putPart(signed.url, blob, loaded => {
@@ -60,7 +60,7 @@
       completedBytes += blob.size;
       onProgress(completedBytes, file.size);
     }
-    return api(`/admin/r2-upload/${encodeURIComponent(state.uploadId)}/complete`, csrf, {});
+    return api(`${baseUrl}/${encodeURIComponent(state.uploadId)}/complete`, csrf, {});
   }
 
   window.uploadR2Multipart = uploadFile;

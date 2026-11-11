@@ -1,0 +1,23 @@
+{% extends '_media_share_base.html' %}
+{% block title %}{{ 'Shared library' if share.kind == 'library' else 'Shared video' }}{% endblock %}
+{% block body %}
+<main class="ms-gate">
+  <section class="ms-card">
+    <p class="ms-eyebrow">{{ 'MEDIA LIBRARY' if share.kind == 'library' else 'SHARED VIDEO' }}</p>
+    <h1>Enter the keyword</h1>
+    <p class="ms-sub">This {{ 'library' if share.kind == 'library' else 'video' }} is private. Type the keyword you were given to watch and download.</p>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<p class="ms-error" role="alert">{{ message }}</p>{% endfor %}{% endwith %}
+    {% if locked %}
+    <p class="ms-error" role="alert">Too many incorrect keywords. Try again in about 15 minutes.</p>
+    {% else %}
+    <form method="post" action="{{ action }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <label class="sr-only" for="ms-keyword">Keyword</label>
+      <input id="ms-keyword" name="keyword" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="80" placeholder="Keyword" required autofocus>
+      <button class="ms-btn">Open {{ 'library' if share.kind == 'library' else 'video' }} →</button>
+    </form>
+    {% endif %}
+    <span class="ms-lock">🔒 Private link · view and download only</span>
+  </section>
+</main>
+{% endblock %}

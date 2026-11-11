@@ -35,6 +35,26 @@ platform's HTTPS origin and browser `PUT` requests. Do not make the bucket
 public. Configure managed database backups and an independent backup/copy policy
 for media objects before accepting customer uploads.
 
+## 2b. Media library: viewer domain and Cloudflare Stream
+
+Public media links are served from their own host so viewers never share cookies,
+pages or sessions with the platform.
+
+1. DNS: add `view.captureiv.com` as a CNAME to the Render service (not proxied while
+   Render issues the certificate), then add it as a custom domain on that service.
+2. Set `VIEWER_BASE_URL=https://view.captureiv.com` on the Render service. Links are
+   then generated on the viewer host; the platform host redirects old share URLs there,
+   and the viewer host answers nothing but share pages (everything else is 404).
+3. R2 bucket CORS: allow `GET` and `HEAD` from `https://view.captureiv.com` (in addition
+   to the platform origin) so shared orthomosaic maps can be fetched by the viewer.
+4. Cloudflare Stream (plays every upload on any device): enable Stream on the account,
+   create an API token with *Account → Stream → Edit*, and set
+   `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_STREAM_API_TOKEN` on Render. Without them,
+   links play the original file (MP4/H.264 plays everywhere; iPhone HEVC may not play
+   in some Windows/Android browsers but can always be downloaded).
+5. Large uploads go straight to R2 in resumable parts (up to `MAX_CONTENT_LENGTH`,
+   8 GB by default) whenever `STORAGE_BACKEND=r2`.
+
 ## 3. Configure Stripe in test mode first
 
 Use a Stripe test account/key and a test webhook endpoint before enabling live

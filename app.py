@@ -7,6 +7,8 @@ import mimetypes
 import math
 import sys
 import time
+import posixpath
+from contextlib import contextmanager
 from datetime import datetime, date, timedelta
 from io import BytesIO
 from functools import wraps
@@ -31,7 +33,7 @@ from flask_login import (
     LoginManager, UserMixin, login_user, logout_user, login_required,
     current_user
 )
-from sqlalchemy import inspect, text, or_, func, event
+from sqlalchemy import inspect, text, or_, func, event, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import with_loader_criteria, Session
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -153,6 +155,9 @@ app.config.update(
     REMEMBER_COOKIE_SAMESITE="Lax",
     REMEMBER_COOKIE_SECURE=secure_cookies,
     MARKETING_SITE_URL=os.environ.get("MARKETING_SITE_URL", "https://captureiv.com").strip().rstrip("/"),
+    # Public media links are served from their own host (e.g. https://view.captureiv.com)
+    # so viewers never share cookies or pages with the platform. Empty = same host.
+    VIEWER_BASE_URL=os.environ.get("VIEWER_BASE_URL", "").strip().rstrip("/"),
     GOOGLE_MAPS_API_KEY=os.environ.get("GOOGLE_MAPS_API_KEY", "").strip(),
 )
 if app_env == "production":
@@ -234,6 +239,7 @@ WALKTHROUGH_CAPTURE_SCHEMA_REVISION = "0021_walkthrough_field_capture"
 SHARE_KEYWORD_SCHEMA_REVISION = "0022_share_keyword_email_gate"
 EMAIL_OPTOUT_SCHEMA_REVISION = "0023_email_opt_out"
 SHARE_LINK_CODE_SCHEMA_REVISION = "0024_share_link_code_mode"
+MEDIA_LIBRARY_SCHEMA_REVISION = "0025_media_library"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 
@@ -550,6 +556,69 @@ WALKTHROUGH_MODELS = (WalkthroughSheet, WalkthroughModel, WalkthroughSession, Wa
 WALKTHROUGH_FILE_MODELS = (WalkthroughSheet, WalkthroughModel, WalkthroughMedia)
 
 
+class MediaVideo(db.Model):
+    """A video in the company media library: labelled, tagged and filed under one project."""
+    __tablename__ = "media_video"
+    id = db.Column(db.Integer, primary_key=True)
+    project = db.Column(db.String(160), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False, default="")
+    tags = db.Column(db.Text, nullable=False, default="[]")
+    filename = db.Column(db.String(500), unique=True, nullable=False)
+    original_filename = db.Column(db.String(500), nullable=False, default="")
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    checksum_sha256 = db.Column(db.String(64), nullable=False, default="")
+    uploaded_by = db.Column(db.Integer, nullable=True, index=True)
+    uploaded_at = db.Column(db.DateTime, default=now_utc, nullable=False, index=True)
+    # Cloudflare Stream copy that plays on every device ("" when Stream is not configured).
+    stream_uid = db.Column(db.String(64), nullable=False, default="")
+    stream_status = db.Column(db.String(20), nullable=False, default="")
+    stream_host = db.Column(db.String(160), nullable=False, default="")
+    stream_token = db.Column(db.Text, nullable=False, default="")
+    stream_token_expires = db.Column(db.DateTime, nullable=True)
+    stream_checked_at = db.Column(db.DateTime, nullable=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+    @property
+    def tag_list(self):
+        try:
+            values = json.loads(self.tags or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return [str(value) for value in values if str(value).strip()] if isinstance(values, list) else []
+
+
+class MediaShare(db.Model):
+    """A public link to one library video ("video") or to the whole library ("library").
+
+    mode "open" plays for anyone with the link; "keyword" asks for a keyword first
+    (stored only as a hash). projects_json limits a library link to a fixed set of
+    projects (used when a team member shares); NULL means every company project.
+    """
+    __tablename__ = "media_share"
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(10), nullable=False, default="video")
+    video_id = db.Column(db.Integer, db.ForeignKey("media_video.id"), nullable=True, index=True)
+    token = db.Column(db.String(64), unique=True, nullable=False, default=lambda: secrets.token_urlsafe(32))
+    mode = db.Column(db.String(10), nullable=False, default="open")
+    keyword_hash = db.Column(db.String(255), nullable=False, default="")
+    projects_json = db.Column(db.Text, nullable=True)
+    show_map = db.Column(db.Boolean, nullable=False, default=False)
+    map_project = db.Column(db.String(160), nullable=False, default="")
+    expires_at = db.Column(db.DateTime, nullable=True)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+    view_count = db.Column(db.Integer, nullable=False, default=0)
+    last_viewed_at = db.Column(db.DateTime, nullable=True)
+    failed_attempts = db.Column(db.Integer, nullable=False, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
+    created_by = db.Column(db.Integer, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+
+# Shares come first so tenant-wide Core deletes remove them before the videos they reference.
+MEDIA_MODELS = (MediaShare, MediaVideo)
+
+
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
@@ -772,7 +841,7 @@ class RateLimitEvent(db.Model):
 
 TENANT_MODELS = (ProjectAccess, ProjectSiteMap, ProjectPhotoReference, ProjectPhotoAnnotation,
                  ProjectPinnedPhoto, ProjectSiteSetup, ProjectFlightPath, ProjectMapPin, Flight, ProjectFile, UploadTransfer,
-                 StorageReservation) + WALKTHROUGH_MODELS
+                 StorageReservation) + WALKTHROUGH_MODELS + MEDIA_MODELS
 
 
 def current_membership():
@@ -1019,7 +1088,7 @@ def record_policy_acceptance(user_id, resource_type, resource_id):
         ip_address=(request.remote_addr or "")[:80]))
 
 WORKSPACE_PAGES = {"dashboard", "admin", "upload", "site_capture", "fieldview_sandbox",
-                   "walkthrough.index", "walkthrough.view"}
+                   "walkthrough.index", "walkthrough.view", "media_library.index"}
 
 
 @app.context_processor
@@ -1039,6 +1108,8 @@ def navigation_context():
         section = "admin"
     elif request.path.startswith("/walkthrough"):
         section = "walkthrough"
+    elif request.path.startswith("/media"):
+        section = "media"
     else:
         section = "archive"
     membership = current_membership()
@@ -1047,6 +1118,8 @@ def navigation_context():
     nav_tools = {}
     if company_id and current_user.is_authenticated:
         nav_tools["site_capture"] = bool(current_user.is_admin and company_feature_enabled("site_maps", company_id))
+        nav_tools["media"] = bool(current_user.active and membership.company
+                                  and membership.company.status == "active")
         nav_tools["upload"] = bool(company_feature_enabled("flight_scans", company_id) and (
             current_user.is_admin or ProjectAssignment.query.filter_by(
                 company_id=company_id, user_id=current_user.id).first() is not None))
@@ -1097,8 +1170,10 @@ def protect_private_upload_directory():
     # static root. Keep existing files in place, but never serve them through
     # the framework's unauthenticated static-file handler.
     if request.endpoint == "static":
+        # Normalise first: "./uploads/x" or "a/../uploads/x" must not slip past the check.
         filename = (request.view_args or {}).get("filename", "").replace("\\", "/")
-        if filename.split("/", 1)[0].lower() == "uploads":
+        name = posixpath.normpath(filename).lstrip("/")
+        if name.startswith("..") or name.split("/", 1)[0].lower() == "uploads":
             abort(404)
 
 
@@ -1396,15 +1471,47 @@ def sha256_file(path, chunk_size=8 * 1024 * 1024):
     return digest.hexdigest()
 
 
-STORAGE_FILE_MODELS = (Flight, ProjectFile, ProjectSiteMap, ProjectPhotoReference, ProjectPinnedPhoto) + WALKTHROUGH_FILE_MODELS
+STORAGE_FILE_MODELS = (Flight, ProjectFile, ProjectSiteMap, ProjectPhotoReference, ProjectPinnedPhoto) + WALKTHROUGH_FILE_MODELS + (MediaVideo,)
+
+
+@contextmanager
+def company_wide_queries():
+    """Run ORM queries without the per-user project filter (callers filter by company).
+
+    Quota must count every file in the company. Without this, an employee's
+    tenant scope hides other projects' files and the quota check undercounts.
+    """
+    previous = getattr(g, "resolving_company_scope", False) if has_request_context() else False
+    if has_request_context():
+        g.resolving_company_scope = True
+    try:
+        yield
+    finally:
+        if has_request_context():
+            g.resolving_company_scope = previous
 
 
 def company_storage_bytes(company_id):
-    return sum(
-        db.session.query(func.coalesce(func.sum(model.file_size), 0))
-        .filter_by(company_id=company_id).scalar() or 0
-        for model in STORAGE_FILE_MODELS
-    )
+    with company_wide_queries():
+        return sum(
+            db.session.query(func.coalesce(func.sum(model.file_size), 0))
+            .filter_by(company_id=company_id).scalar() or 0
+            for model in STORAGE_FILE_MODELS
+        )
+
+
+def company_reserved_bytes(company_id, now=None):
+    """Bytes held by unfinished uploads (local reservations and in-flight R2 transfers)."""
+    now = now or now_utc()
+    with company_wide_queries():
+        local_reserved = (db.session.query(func.coalesce(func.sum(StorageReservation.file_size), 0))
+                          .filter(StorageReservation.company_id == company_id,
+                                  StorageReservation.expires_at > now).scalar() or 0)
+        cloud_reserved = (db.session.query(func.coalesce(func.sum(UploadTransfer.file_size), 0))
+                          .filter(UploadTransfer.company_id == company_id,
+                                  UploadTransfer.status.in_(("starting", "uploading")),
+                                  UploadTransfer.expires_at > now).scalar() or 0)
+    return local_reserved + cloud_reserved
 
 
 def company_storage_limit_bytes(company, subscription=None):
@@ -1447,15 +1554,8 @@ def reserve_company_storage(company_id, file_size, *, replacing_size=0):
     ).delete(synchronize_session=False)
     limit = company_storage_limit_bytes(company)
     used = company_storage_bytes(company.id)
-    local_reserved = (db.session.query(func.coalesce(func.sum(StorageReservation.file_size), 0))
-                      .filter(StorageReservation.company_id == company.id,
-                              StorageReservation.expires_at > now).scalar() or 0)
-    cloud_reserved = (db.session.query(func.coalesce(func.sum(UploadTransfer.file_size), 0))
-                      .filter(UploadTransfer.company_id == company.id,
-                              UploadTransfer.status.in_(("starting", "uploading")),
-                              UploadTransfer.expires_at > now).scalar() or 0)
     reserved_size = max(0, file_size - max(0, replacing_size))
-    if not limit or used + local_reserved + cloud_reserved + reserved_size > limit:
+    if not limit or used + company_reserved_bytes(company.id, now) + reserved_size > limit:
         db.session.rollback()
         raise ValueError("The upload would exceed the company storage allowance.")
     reservation = StorageReservation(
@@ -1579,7 +1679,7 @@ def save_upload(file_storage, *, replacing_size=0):
 
 PROJECT_MODELS = (Flight, ProjectFile, ProjectAccess, ProjectSiteMap, ProjectPhotoReference,
                   ProjectPhotoAnnotation, ProjectPinnedPhoto, ProjectSiteSetup, ProjectFlightPath, ProjectMapPin,
-                  WalkthroughSheet, WalkthroughModel, WalkthroughSession)
+                  WalkthroughSheet, WalkthroughModel, WalkthroughSession, MediaVideo)
 
 
 def company_project_names(company_id):
@@ -1866,7 +1966,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION),
                             SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION),
                             SchemaMigration(revision=EMAIL_OPTOUT_SCHEMA_REVISION),
-                            SchemaMigration(revision=SHARE_LINK_CODE_SCHEMA_REVISION)])
+                            SchemaMigration(revision=SHARE_LINK_CODE_SCHEMA_REVISION),
+                            SchemaMigration(revision=MEDIA_LIBRARY_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1892,6 +1993,7 @@ def migrate_sqlite():
         apply_share_link_code_migration()
         apply_walkthrough_migration()
         apply_walkthrough_capture_migration()
+        apply_media_library_migration()
         return
 
     timestamp_type = migration_timestamp_type()
@@ -2005,6 +2107,7 @@ def migrate_sqlite():
     apply_share_link_code_migration()
     apply_walkthrough_migration()
     apply_walkthrough_capture_migration()
+    apply_media_library_migration()
 
 
 def apply_enterprise_schema_migration():
@@ -2352,6 +2455,32 @@ def apply_walkthrough_capture_migration():
             if name not in existing:
                 db.session.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {sql_type}'))
     db.session.add(SchemaMigration(revision=WALKTHROUGH_CAPTURE_SCHEMA_REVISION))
+    db.session.commit()
+
+
+def ensure_media_stream_columns():
+    """Add the Cloudflare Stream columns to media_video when an earlier build created it without them."""
+    columns = {column["name"] for column in inspect(db.engine).get_columns("media_video")}
+    timestamp = migration_timestamp_type()
+    for name, ddl in (("stream_uid", "VARCHAR(64) NOT NULL DEFAULT ''"), ("stream_status", "VARCHAR(20) NOT NULL DEFAULT ''"),
+                      ("stream_host", "VARCHAR(160) NOT NULL DEFAULT ''"), ("stream_token", "TEXT NOT NULL DEFAULT ''"),
+                      ("stream_token_expires", timestamp), ("stream_checked_at", timestamp)):
+        if name not in columns:
+            db.session.execute(text(f'ALTER TABLE "media_video" ADD COLUMN "{name}" {ddl}'))
+    db.session.commit()
+
+
+def apply_media_library_migration():
+    """Create the media library tables (additive only)."""
+    if db.session.get(SchemaMigration, MEDIA_LIBRARY_SCHEMA_REVISION):
+        if "media_video" in set(inspect(db.engine).get_table_names()):
+            ensure_media_stream_columns()
+        return
+    # Commit first: create_all runs on its own connection and must not wait on this session.
+    db.session.commit()
+    db.metadata.create_all(db.engine, tables=[model.__table__ for model in (MediaVideo, MediaShare)])
+    ensure_media_stream_columns()
+    db.session.add(SchemaMigration(revision=MEDIA_LIBRARY_SCHEMA_REVISION))
     db.session.commit()
 
 
@@ -3980,6 +4109,8 @@ def delete_demo_workspace(company_id):
         abort(409, "A demo with Stripe billing references cannot be deleted by this action.")
     memberships = CompanyMembership.query.filter_by(company_id=company.id).all()
     user_ids = [row.user_id for row in memberships]
+    stream_uids = [uid for (uid,) in db.session.execute(
+        select(MediaVideo.__table__.c.stream_uid).where(MediaVideo.__table__.c.company_id == company.id)).all() if uid]
     for model in STORAGE_FILE_MODELS:
         for filename, in model.query.with_entities(model.filename).filter_by(company_id=company.id).all():
             if is_r2_filename(filename):
@@ -4006,6 +4137,10 @@ def delete_demo_workspace(company_id):
     name = company.name
     db.session.delete(company)
     db.session.commit()
+    if stream_uids:
+        import media_library
+        for uid in stream_uids:
+            media_library.stream_delete_uid(uid)
     audit("demo_workspace_deleted", "company", company_id, "Deleted non-billable demo workspace and its project files")
     flash(f"Demo workspace {name} and its project data were deleted.", "success")
     return redirect(url_for("platform_owner_dashboard"))
@@ -4310,7 +4445,7 @@ def retrieve_workspace():
     files = []
     for model, label in ((Flight, "Drone footage"), (ProjectFile, "Document"),
                          (ProjectSiteMap, "Site map"), (ProjectPhotoReference, "Reference photo"),
-                         (ProjectPinnedPhoto, "Site photo")):
+                         (ProjectPinnedPhoto, "Site photo"), (MediaVideo, "Media library video")):
         for item in model.query.all():
             files.append({"category": label, "project": item.project,
                           "name": (getattr(item, "original_filename", None)
@@ -4479,13 +4614,15 @@ def protected_file(filename):
     # viewers may access files only from the project that their code unlocks.
     safe = filename if is_r2_filename(filename) else Path(filename).name
     viewer_code = session.get("viewer_code")
+    media_record = None
     if current_user.is_authenticated:
         flight_record = Flight.query.filter_by(filename=safe).first()
         document_record = ProjectFile.query.filter_by(filename=safe).first()
         map_record = ProjectSiteMap.query.filter_by(filename=safe).first()
         photo_record = ProjectPhotoReference.query.filter_by(filename=safe).first()
         pinned_photo_record = ProjectPinnedPhoto.query.filter_by(filename=safe).first()
-        if not any((flight_record, document_record, map_record, photo_record, pinned_photo_record)):
+        media_record = MediaVideo.query.filter_by(filename=safe).first()
+        if not any((flight_record, document_record, map_record, photo_record, pinned_photo_record, media_record)):
             abort(404)
         if flight_record and not company_feature_enabled("flight_scans", flight_record.company_id):
             abort(403)
@@ -4543,7 +4680,8 @@ def protected_file(filename):
     if is_r2_filename(safe):
         try:
             target = R2Storage().signed_download(
-                r2_object_key(safe), flight.original_filename if flight else (doc.original_filename or doc.name) if doc else safe,
+                r2_object_key(safe), flight.original_filename if flight else (doc.original_filename or doc.name) if doc
+                else (media_record.original_filename if media_record else safe),
                 content_type, download,
             )
         except Exception:
@@ -5111,6 +5249,8 @@ def upload_batch():
 
 
 R2_UPLOAD_PART_SIZE = 64 * 1024 * 1024
+# Media-library uploads reuse UploadTransfer (so quota counts them) with this direction.
+MEDIA_TRANSFER_DIRECTION = "__media__"
 R2_UPLOAD_LIFETIME = timedelta(hours=24)
 
 
@@ -5182,6 +5322,7 @@ def start_r2_upload():
         return jsonify({"error": "This workspace is not active for uploads."}), 403
     existing = (UploadTransfer.query.filter_by(company_id=company.id, user_id=current_user.id,
                                                 fingerprint=fingerprint)
+                .filter(UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION)
                 .order_by(UploadTransfer.created_at.desc()).first())
     if existing and existing.status == "uploading" and existing.expires_at > now_utc():
         try:
@@ -5195,14 +5336,7 @@ def start_r2_upload():
 
     limit = company_storage_limit_bytes(company)
     used = company_storage_bytes(company.id)
-    reserved = (db.session.query(func.coalesce(func.sum(UploadTransfer.file_size), 0))
-                .filter(UploadTransfer.company_id == company.id,
-                        UploadTransfer.status.in_(("starting", "uploading")),
-                        UploadTransfer.expires_at > now_utc()).scalar() or 0)
-    local_reserved = (db.session.query(func.coalesce(func.sum(StorageReservation.file_size), 0))
-                      .filter(StorageReservation.company_id == company.id,
-                              StorageReservation.expires_at > now_utc()).scalar() or 0)
-    if not limit or used + reserved + local_reserved + file_size > limit:
+    if not limit or used + company_reserved_bytes(company.id) + file_size > limit:
         return jsonify({"error": "This file would exceed the company storage allowance."}), 413
 
     upload_id = str(uuid4())
@@ -5242,7 +5376,8 @@ def start_r2_upload():
 @company_feature_required("flight_scans")
 def r2_upload_part_url(upload_id):
     transfer = UploadTransfer.query.filter_by(id=upload_id, company_id=current_company_id(),
-                                               user_id=current_user.id, status="uploading").first_or_404()
+                                               user_id=current_user.id, status="uploading").filter(
+        UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION).first_or_404()
     if not user_can_upload_project(transfer.project, transfer.company_id):
         abort(403)
     if transfer.expires_at <= now_utc() or not transfer.multipart_upload_id:
@@ -5269,7 +5404,8 @@ def r2_upload_part_url(upload_id):
 @company_feature_required("flight_scans")
 def complete_r2_upload(upload_id):
     transfer = UploadTransfer.query.filter_by(id=upload_id, company_id=current_company_id(),
-                                               user_id=current_user.id).first_or_404()
+                                               user_id=current_user.id).filter(
+        UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION).first_or_404()
     if not user_can_upload_project(transfer.project, transfer.company_id):
         abort(403)
     if transfer.status == "completed" and transfer.flight_id:
@@ -5349,7 +5485,8 @@ def complete_r2_upload(upload_id):
 @company_feature_required("flight_scans")
 def abort_r2_upload(upload_id):
     transfer = UploadTransfer.query.filter_by(id=upload_id, company_id=current_company_id(),
-                                          user_id=current_user.id, status="uploading").first_or_404()
+                                          user_id=current_user.id, status="uploading").filter(
+        UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION).first_or_404()
     if not user_can_upload_project(transfer.project, transfer.company_id):
         abort(403)
     try:
@@ -6241,6 +6378,12 @@ def configure_basic_billing(monthly_price_id, annual_price_id):
 # The site walkthrough viewer lives in its own module and is granted per company.
 from walkthrough import create_walkthrough_blueprint  # noqa: E402
 app.register_blueprint(create_walkthrough_blueprint(sys.modules[__name__]))
+from media_library import create_media_library_blueprint  # noqa: E402
+app.register_blueprint(create_media_library_blueprint(sys.modules[__name__]))
+from media_library import ViewerSessionInterface  # noqa: E402
+# The public viewer host gets its own session cookie (name and signing salt), so a
+# viewer session can never be presented to the platform or the other way round.
+app.session_interface = ViewerSessionInterface()
 
 
 if __name__ == "__main__":
