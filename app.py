@@ -26,7 +26,7 @@ from email.utils import make_msgid
 
 from flask import (
     Flask, render_template, request, redirect, url_for, flash,
-    send_from_directory, abort, session, jsonify, make_response, g, has_request_context
+    send_from_directory, abort, session, jsonify, make_response, g, has_request_context, Response
 )
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
@@ -1100,9 +1100,42 @@ def security_headers(response):
     headers.setdefault("X-Frame-Options", "DENY")
     headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+    headers.setdefault("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+                                             "magnetometer=(), microphone=(), usb=()")
+    # Allow popups (Google sign-in) to keep their opener; block other cross-origin windows.
+    headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+    headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+    # Only the legal pages belong in search results; sign-in and project pages stay out.
+    if not request.path.startswith("/legal"):
+        headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    # Pages carry per-session CSRF tokens and private data: never cache them.
+    if response.mimetype == "text/html" and not request.path.startswith("/legal"):
+        headers.setdefault("Cache-Control", "no-store")
     if app.config.get("APP_ENV") == "production":
         headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return response
+
+
+SECURITY_TXT = ("Contact: mailto:support@captureiv.com\nExpires: 2027-11-12T00:00:00.000Z\nPreferred-Languages: en\n"
+                "Canonical: https://app.captureiv.com/.well-known/security.txt\n"
+                "Canonical: https://www.captureiv.com/.well-known/security.txt\n"
+                "Policy: https://www.captureiv.com/contact\n")
+
+
+@app.get("/.well-known/security.txt")
+@app.get("/security.txt")
+def security_txt():
+    return Response(SECURITY_TXT, mimetype="text/plain")
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    return Response("User-agent: *\nAllow: /legal/\nDisallow: /\n", mimetype="text/plain")
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    return redirect(url_for("static", filename="favicon.svg"), 301)
 
 
 def legal_details():
