@@ -152,7 +152,7 @@ app.config.update(
     REMEMBER_COOKIE_HTTPONLY=True,
     REMEMBER_COOKIE_SAMESITE="Lax",
     REMEMBER_COOKIE_SECURE=secure_cookies,
-    MARKETING_SITE_URL=os.environ.get("MARKETING_SITE_URL", "https://captureiv.com").strip().rstrip("/"),
+    MARKETING_SITE_URL=os.environ.get("MARKETING_SITE_URL", "https://www.captureiv.com").strip().rstrip("/"),
     GOOGLE_MAPS_API_KEY=os.environ.get("GOOGLE_MAPS_API_KEY", "").strip(),
 )
 if app_env == "production":

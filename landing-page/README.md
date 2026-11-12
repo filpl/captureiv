@@ -37,7 +37,7 @@ The source assumes it is served at the root of its marketing hostname. A `/landi
 
 ### Hosted deployment (captureiv.com)
 
-The live site runs as the `capture-iv-landing-page` Worker with custom domains `captureiv.com` and `www.captureiv.com`. Pages, images and the walkthrough video are stored in the private R2 bucket `capture-iv-site` and served by `worker/assets-router.js`, which also handles `POST /api/contact` (D1 `construct-iv-inquiries`), the `/portal` redirect and security headers. To publish changes:
+The live site runs as the `capture-iv-landing-page` Worker with custom domains `captureiv.com` and `www.captureiv.com`. The public address is `https://www.captureiv.com`: the Worker sends the bare domain and plain http there with a 301 (308 for form posts), keeping the path, and the zone has Always Use HTTPS on. Pages, images and the walkthrough video are stored in the private R2 bucket `capture-iv-site` and served by `worker/assets-router.js`, which also handles `POST /api/contact` (D1 `construct-iv-inquiries`), the `/portal` redirect and security headers. To publish changes:
 
 ```sh
 npm run build:assets                        # web/ -> dist/assets with platform URLs filled in

@@ -29,9 +29,24 @@ function secure(response, extra = {}) {
 const notFound = () => secure(new Response('Page not found. Return to Capture IV at /.',
   {status: 404, headers: {'Content-Type': 'text/plain; charset=utf-8'}}));
 
+// The site's one public address. The bare domain and plain http are sent here,
+// keeping the path and query, so visitors always see https://www.captureiv.com.
+const CANONICAL_HOST = 'www.captureiv.com';
+const REDIRECT_HOSTS = new Set(['captureiv.com', CANONICAL_HOST]);
+
+function canonicalRedirect(url, method) {
+  if (!REDIRECT_HOSTS.has(url.hostname)) return null; // workers.dev and previews are left alone
+  if (url.hostname === CANONICAL_HOST && url.protocol === 'https:') return null;
+  const target = `https://${CANONICAL_HOST}${url.pathname}${url.search}`;
+  // 301 for page views; 308 keeps the method and body for anything else (e.g. the contact form).
+  return secure(Response.redirect(target, ['GET', 'HEAD'].includes(method) ? 301 : 308));
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const redirect = canonicalRedirect(url, request.method);
+    if (redirect) return redirect;
     if (url.pathname === '/portal') {
       return secure(Response.redirect(new URL(env.PLATFORM_LOGIN_URL || '/', request.url).href, 302));
     }
