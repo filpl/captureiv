@@ -1,6 +1,6 @@
 {% extends '_media_share_base.html' %}
 {% block title %}Media library{% endblock %}
-{% block head_extra %}{% if tab == 'map' %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}?v=1"><link rel="stylesheet" href="{{ url_for('static', filename='project-viewer.css') }}?v=6">{% endif %}{% endblock %}
+{% block head_extra %}{% if tab == 'map' %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}?v=1"><link rel="stylesheet" href="{{ url_for('static', filename='project-viewer.css') }}?v=8">{% endif %}{% endblock %}
 {% block top_meta %}<span class="ms-hide-sm">{{ company.name if company else '' }}</span><span class="ms-badge"><i></i>Shared library</span>{% endblock %}
 {% block body %}
 <main class="ms-main">

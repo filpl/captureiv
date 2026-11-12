@@ -96,7 +96,8 @@
 }
 
 /* Smooth, restrained tech-style motion for map information popups. */
-.leaflet-popup{animation:viewer-map-popup-in .24s cubic-bezier(.2,.75,.25,1) both;transform-origin:50% 100%}
+/* Animate the inner box only: Leaflet positions .leaflet-popup itself with a transform. */
+.leaflet-popup-content-wrapper,.leaflet-popup-tip-container{animation:viewer-map-popup-in .24s cubic-bezier(.2,.75,.25,1) both;transform-origin:50% 100%}
 .leaflet-popup-content-wrapper{border:1px solid #cfe0f6;border-radius:10px;box-shadow:0 14px 38px #10243b30,0 0 0 3px #3b82f60d;backdrop-filter:blur(8px)}
 .leaflet-popup-tip{box-shadow:0 5px 14px #10243b1f}
 .viewer-photo-popup>strong{color:#172b45}
