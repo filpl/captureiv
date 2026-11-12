@@ -145,6 +145,33 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertIn(b'data-center-lat="40.71"', response.data)
         self.assertIn(b'data-center-lng="-74.01"', response.data)
 
+    def test_site_capture_saves_return_to_the_site_capture_map(self):
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
+        page = client.get("/admin/site-capture?map_project=A+project")
+        csrf = re.search(rb'name="_csrf" value="([^\"]+)"', page.data).group(1).decode()
+        route = {"_csrf": csrf, "project": "A project", "name": "Redirect route", "date": "2026-10-19",
+                 "points": json.dumps([[40.1, -76.1], [40.2, -76.2]])}
+        saved = client.post("/admin/projects/paths", data=route)
+        self.assertEqual(saved.status_code, 302)
+        self.assertEqual(saved.headers["Location"],
+                         "/admin/site-capture?map_project=A+project&map_date=2026-10-19#videos")
+        overview = client.post("/admin/projects/paths", data={**route, "return_to": "overview"})
+        self.assertTrue(overview.headers["Location"].endswith("map_date=2026-10-19#overview"))
+        with portal.app.app_context():
+            path_id = portal.ProjectFlightPath.query.filter_by(company_id=1, name="Redirect route").first().id
+        deleted = client.post(f"/admin/projects/paths/{path_id}/delete", data={"_csrf": csrf})
+        self.assertEqual(deleted.headers["Location"],
+                         "/admin/site-capture?map_project=A+project&map_date=2026-10-19#videos")
+        setup = client.post("/admin/projects/site-setup", data={
+            "_csrf": csrf, "project": "A project", "module": "map",
+            "center_lat": "40.1", "center_lng": "-76.1", "zoom": "16"})
+        self.assertEqual(setup.status_code, 302)
+        self.assertTrue(setup.headers["Location"].startswith("/admin/site-capture?map_project=A+project"))
+        followed = client.get(setup.headers["Location"])
+        self.assertIn(b"map-project-picker", followed.data)
+
     def test_weekly_project_code_rotation_emails_before_changing_code(self):
         access_id = None
         with portal.app.app_context():
@@ -896,7 +923,7 @@ class TenantIsolationTests(unittest.TestCase):
         client = portal.app.test_client()
         with client.session_transaction() as state:
             state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
-        capture_page = client.get(f"/admin/upload?map_project={project}")
+        capture_page = client.get(f"/admin/site-capture?map_project={project}")
         csrf = re.search(rb'name="_csrf" value="([^\"]+)"', capture_page.data).group(1).decode()
         uploads = MultiDict([
             ("_csrf", csrf), ("project", project), ("pin_id", pin_id),

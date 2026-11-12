@@ -104,3 +104,6 @@
 .scan-progress b{position:relative;display:block;text-align:center;line-height:20px;font-size:10.5px;color:#fff;mix-blend-mode:difference}
 .scan-upload-error{flex-basis:100%;margin:0;color:#b23a3a;font-size:11px}
 @media(max-width:700px){.scan-item{grid-template-columns:1fr}.scan-item img,.scan-thumb-empty{width:100%}.scan-upload input[name=name]{min-width:0;width:100%}.scan-upload label{width:100%}}
+
+/* Shared platform topbar: keep the nav beside the logo, as style.css does on the other platform pages. */
+.platform-topbar .platform-nav{flex:1}

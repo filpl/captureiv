@@ -14,7 +14,7 @@ from io import BytesIO
 from functools import wraps
 from types import SimpleNamespace
 from pathlib import Path
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import urlencode, urlsplit
 from uuid import uuid4
 from urllib.request import Request as URLRequest, urlopen
 from urllib.error import HTTPError, URLError
@@ -4840,10 +4840,10 @@ def upload_project_photo_reference():
     photo = request.files.get("photo_reference")
     if not project or not photo or not photo.filename or extension(photo.filename) not in {"jpg", "jpeg", "png", "webp"}:
         flash("Choose a JPG, PNG, or WebP site image.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#photos")
+        return redirect(url_for("site_capture", map_project=project, _anchor="photos"))
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#photos")
+        return redirect(url_for("site_capture", map_project=project, _anchor="photos"))
     stored = None
     try:
         reference = ProjectPhotoReference.query.filter_by(project=project).first()
@@ -4867,7 +4867,7 @@ def upload_project_photo_reference():
             release_storage_reservation(stored[4])
         app.logger.exception("Photo reference upload failed")
         flash("Photo reference upload failed.", "error")
-    return redirect(f"/admin/upload?map_project={quote(project)}#photos")
+    return redirect(url_for("site_capture", map_project=project, _anchor="photos"))
 
 
 @app.post("/admin/projects/photo-annotations")
@@ -5317,7 +5317,7 @@ def upload_batch():
             failed += 1
     flash(f"Batch upload complete: {created} uploaded, {failed} skipped/failed.", "success" if created else "error")
     if request.form.get("return_to") == "uploads":
-        return redirect(f"/admin/upload?map_project={quote(project)}&map_date={date_value.isoformat()}#uploads")
+        return redirect(url_for("site_capture", map_project=project, map_date=date_value.isoformat(), _anchor="uploads"))
     return redirect(url_for("admin") + "#recent-flights" if current_user.is_admin else url_for("dashboard"))
 
 
@@ -5639,10 +5639,10 @@ def upload_project_map():
     allowed = {"tif", "tiff"} if module == "ortho" else {"jpg", "jpeg", "png", "webp"}
     if not project or module not in {"image", "ortho"} or not map_file or not map_file.filename or extension(map_file.filename) not in allowed:
         flash("Choose an image for Site image mode or a GeoTIFF for Orthomosaic mode.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+        return redirect(url_for("site_capture", map_project=project, _anchor="videos"))
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+        return redirect(url_for("site_capture", map_project=project, _anchor="videos"))
     stored = None
     try:
         site_map = ProjectSiteMap.query.filter_by(project=project).first()
@@ -5675,7 +5675,7 @@ def upload_project_map():
             release_storage_reservation(stored[4])
         app.logger.exception("Project map upload failed")
         flash("Map upload failed.", "error")
-    return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+    return redirect(url_for("site_capture", map_project=project, _anchor="videos"))
 
 
 @app.post("/admin/projects/site-setup")
@@ -5710,7 +5710,7 @@ def save_project_site_setup():
         abort(400, "Add a name for the site boundary")
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+        return redirect(url_for("site_capture", map_project=project, _anchor="videos"))
     try:
         lat = float(request.form.get("center_lat", ""))
         lng = float(request.form.get("center_lng", ""))
@@ -5734,7 +5734,7 @@ def save_project_site_setup():
     db.session.commit()
     audit("site_setup", "project", project, f"Saved {module} site reference")
     flash("Project site setup saved.", "success")
-    return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+    return redirect(url_for("site_capture", map_project=project, _anchor="videos"))
 
 
 @app.post("/admin/projects/paths")
@@ -5801,7 +5801,8 @@ def save_project_flight_path():
     db.session.commit()
     audit("save_flight_path", "project", project, f"Saved {name} for {date_value}")
     flash("Flight path saved.", "success")
-    return redirect(f"/admin/upload?map_project={quote(project)}&map_date={date_value.isoformat()}#{'overview' if request.form.get('return_to') == 'overview' else 'videos'}")
+    return redirect(url_for("site_capture", map_project=project, map_date=date_value.isoformat(),
+                            _anchor="overview" if request.form.get("return_to") == "overview" else "videos"))
 
 
 @app.post("/admin/projects/paths/<int:path_id>/delete")
@@ -5813,7 +5814,7 @@ def delete_project_flight_path(path_id):
     db.session.delete(path)
     db.session.commit()
     audit("delete_flight_path", "project", project, f"Deleted route {path.name}")
-    return redirect(f"/admin/upload?map_project={quote(project)}&map_date={date_value.isoformat()}#videos")
+    return redirect(url_for("site_capture", map_project=project, map_date=date_value.isoformat(), _anchor="videos"))
 
 
 @app.post("/admin/projects/pins")
@@ -5836,7 +5837,7 @@ def create_project_pin():
                                  x_percent=x, y_percent=y))
     db.session.commit()
     audit("add_map_pin", "project", project, f"Added {direction} pin at {x:.1f}%, {y:.1f}%")
-    return redirect(url_for("site_capture", map_project=project) + "#videos")
+    return redirect(url_for("site_capture", map_project=project, _anchor="videos"))
 
 
 @app.post("/admin/projects/pins/<int:pin_id>/delete")
@@ -5848,7 +5849,7 @@ def delete_project_pin(pin_id):
     db.session.delete(pin)
     db.session.commit()
     audit("delete_map_pin", "project", project, f"Removed {pin.direction} pin")
-    return redirect(url_for("site_capture", map_project=project) + "#videos")
+    return redirect(url_for("site_capture", map_project=project, _anchor="videos"))
 
 
 @app.post("/admin/document")
