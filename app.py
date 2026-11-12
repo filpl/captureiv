@@ -240,6 +240,7 @@ SHARE_KEYWORD_SCHEMA_REVISION = "0022_share_keyword_email_gate"
 EMAIL_OPTOUT_SCHEMA_REVISION = "0023_email_opt_out"
 SHARE_LINK_CODE_SCHEMA_REVISION = "0024_share_link_code_mode"
 MEDIA_LIBRARY_SCHEMA_REVISION = "0025_media_library"
+PROJECT_SCAN_SCHEMA_REVISION = "0026_project_scans"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 
@@ -398,6 +399,48 @@ class ProjectFlightPath(db.Model):
     created_at = db.Column(db.DateTime, default=now_utc, nullable=False)
     flight = db.relationship("Flight", lazy="joined")
     company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+
+class ProjectScan(db.Model):
+    """A laser scan (LAS/LAZ/E57) of a project site on one capture date. The original is kept for
+    download; a converted web copy (points), a georeferenced top-down map overlay and a thumbnail are
+    made in the background. file_size counts the original plus those converted copies."""
+    id = db.Column(db.Integer, primary_key=True)
+    project = db.Column(db.String(160), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    name = db.Column(db.String(160), nullable=False, default="")
+    filename = db.Column(db.String(500), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False, default="")
+    source_size = db.Column(db.BigInteger, nullable=False, default=0)
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default="processing")
+    error = db.Column(db.String(300), nullable=False, default="")
+    processing_started_at = db.Column(db.DateTime, nullable=True)
+    points_filename = db.Column(db.String(500), nullable=False, default="")
+    overlay_filename = db.Column(db.String(500), nullable=False, default="")
+    thumb_filename = db.Column(db.String(500), nullable=False, default="")
+    point_count = db.Column(db.BigInteger, nullable=False, default=0)
+    meta_json = db.Column(db.Text, nullable=False, default="{}")
+    uploaded_by = db.Column(db.Integer, nullable=True)
+    uploaded_at = db.Column(db.DateTime, default=now_utc, nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
+
+    @property
+    def meta(self):
+        try:
+            value = json.loads(self.meta_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @property
+    def overlay_bounds(self):
+        bounds = (self.meta.get("geo") or {}).get("bounds")
+        return bounds if self.status == "ready" and self.overlay_filename and bounds else None
+
+    @property
+    def derived_files(self):
+        return [name for name in (self.points_filename, self.overlay_filename, self.thumb_filename) if name]
 
 
 class ProjectMapPin(db.Model):
@@ -841,7 +884,7 @@ class RateLimitEvent(db.Model):
 
 TENANT_MODELS = (ProjectAccess, ProjectSiteMap, ProjectPhotoReference, ProjectPhotoAnnotation,
                  ProjectPinnedPhoto, ProjectSiteSetup, ProjectFlightPath, ProjectMapPin, Flight, ProjectFile, UploadTransfer,
-                 StorageReservation) + WALKTHROUGH_MODELS + MEDIA_MODELS
+                 StorageReservation, ProjectScan) + WALKTHROUGH_MODELS + MEDIA_MODELS
 
 
 def current_membership():
@@ -1351,6 +1394,10 @@ def upload_signature_ok(ext, head):
         return head[:4] in {b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"}
     if ext == "glb":
         return head.startswith(b"glTF")
+    if ext in {"las", "laz"}:
+        return head.startswith(b"LASF")
+    if ext == "e57":
+        return head.startswith(b"ASTM-E57")
     if ext in {"mp4", "m4v", "mov"}:
         return head[4:8] in {b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip", b"pnot"}
     if ext == "webm":
@@ -1367,7 +1414,7 @@ def upload_signature_ok(ext, head):
     return False
 
 
-DOWNLOAD_ONLY_EXTENSIONS = {"txt", "csv", "zip", "docx", "xlsx"}
+DOWNLOAD_ONLY_EXTENSIONS = {"txt", "csv", "zip", "docx", "xlsx", "las", "laz", "e57"}
 
 
 def video_signature_valid(stream, filename):
@@ -1471,7 +1518,7 @@ def sha256_file(path, chunk_size=8 * 1024 * 1024):
     return digest.hexdigest()
 
 
-STORAGE_FILE_MODELS = (Flight, ProjectFile, ProjectSiteMap, ProjectPhotoReference, ProjectPinnedPhoto) + WALKTHROUGH_FILE_MODELS + (MediaVideo,)
+STORAGE_FILE_MODELS = (Flight, ProjectFile, ProjectSiteMap, ProjectPhotoReference, ProjectPinnedPhoto) + WALKTHROUGH_FILE_MODELS + (MediaVideo, ProjectScan)
 
 
 @contextmanager
@@ -1679,7 +1726,7 @@ def save_upload(file_storage, *, replacing_size=0):
 
 PROJECT_MODELS = (Flight, ProjectFile, ProjectAccess, ProjectSiteMap, ProjectPhotoReference,
                   ProjectPhotoAnnotation, ProjectPinnedPhoto, ProjectSiteSetup, ProjectFlightPath, ProjectMapPin,
-                  WalkthroughSheet, WalkthroughModel, WalkthroughSession, MediaVideo)
+                  WalkthroughSheet, WalkthroughModel, WalkthroughSession, MediaVideo, ProjectScan)
 
 
 def company_project_names(company_id):
@@ -1967,7 +2014,8 @@ def migrate_sqlite():
                             SchemaMigration(revision=SHARE_KEYWORD_SCHEMA_REVISION),
                             SchemaMigration(revision=EMAIL_OPTOUT_SCHEMA_REVISION),
                             SchemaMigration(revision=SHARE_LINK_CODE_SCHEMA_REVISION),
-                            SchemaMigration(revision=MEDIA_LIBRARY_SCHEMA_REVISION)])
+                            SchemaMigration(revision=MEDIA_LIBRARY_SCHEMA_REVISION),
+                            SchemaMigration(revision=PROJECT_SCAN_SCHEMA_REVISION)])
         db.session.commit()
         return
     if "schema_migration" in existing_tables and db.session.get(SchemaMigration, CURRENT_SCHEMA_REVISION):
@@ -1994,6 +2042,7 @@ def migrate_sqlite():
         apply_walkthrough_migration()
         apply_walkthrough_capture_migration()
         apply_media_library_migration()
+        apply_project_scan_migration()
         return
 
     timestamp_type = migration_timestamp_type()
@@ -2108,6 +2157,7 @@ def migrate_sqlite():
     apply_walkthrough_migration()
     apply_walkthrough_capture_migration()
     apply_media_library_migration()
+    apply_project_scan_migration()
 
 
 def apply_enterprise_schema_migration():
@@ -2484,6 +2534,16 @@ def apply_media_library_migration():
     db.session.commit()
 
 
+def apply_project_scan_migration():
+    """Create the project_scan table (additive only)."""
+    if db.session.get(SchemaMigration, PROJECT_SCAN_SCHEMA_REVISION):
+        return
+    db.session.commit()  # create_all uses its own connection; don't hold locks it would wait on
+    db.metadata.create_all(db.engine, tables=[ProjectScan.__table__])
+    db.session.add(SchemaMigration(revision=PROJECT_SCAN_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_basic_plan_defaults():
     """Apply the approved Basic entitlements once, without touching Enterprise."""
     if db.session.get(SchemaMigration, BASIC_PLAN_SCHEMA_REVISION):
@@ -2698,8 +2758,10 @@ def render_project_view(access):
     all_flight_paths = ProjectFlightPath.query.filter_by(
         project=access.project, company_id=access.company_id
     ).order_by(ProjectFlightPath.date, ProjectFlightPath.created_at).all()
+    scans_by_date = project_scans_blueprint.client_scans_by_date(access)
     dates = sorted(
-        {f.date for f in flights} | {path.date for path in all_flight_paths},
+        {f.date for f in flights} | {path.date for path in all_flight_paths}
+        | {date.fromisoformat(day) for day in scans_by_date},
         reverse=True,
     )
     selected_date = parse_date(request.args.get("date"))
@@ -2805,6 +2867,7 @@ def render_project_view(access):
                            photo_area_data=photo_area_data,
                            site_setup=site_setup, flight_paths=flight_path_data,
                            flight_paths_by_date=flight_paths_by_date,
+                           scans_by_date=scans_by_date,
                            compare_date=compare_date,
                            google_maps_api_key=app.config.get("GOOGLE_MAPS_API_KEY", ""),
                            map_default_center=request_geo_center(),
@@ -4111,6 +4174,12 @@ def delete_demo_workspace(company_id):
     user_ids = [row.user_id for row in memberships]
     stream_uids = [uid for (uid,) in db.session.execute(
         select(MediaVideo.__table__.c.stream_uid).where(MediaVideo.__table__.c.company_id == company.id)).all() if uid]
+    scan_table = ProjectScan.__table__
+    for row in db.session.execute(select(scan_table.c.points_filename, scan_table.c.overlay_filename,
+                                         scan_table.c.thumb_filename).where(scan_table.c.company_id == company.id)).all():
+        for extra in row:  # converted scan copies aren't in STORAGE_FILE_MODELS' filename column
+            if extra:
+                delete_stored_file(extra)
     for model in STORAGE_FILE_MODELS:
         for filename, in model.query.with_entities(model.filename).filter_by(company_id=company.id).all():
             if is_r2_filename(filename):
@@ -4445,7 +4514,8 @@ def retrieve_workspace():
     files = []
     for model, label in ((Flight, "Drone footage"), (ProjectFile, "Document"),
                          (ProjectSiteMap, "Site map"), (ProjectPhotoReference, "Reference photo"),
-                         (ProjectPinnedPhoto, "Site photo"), (MediaVideo, "Media library video")):
+                         (ProjectPinnedPhoto, "Site photo"), (MediaVideo, "Media library video"),
+                         (ProjectScan, "Laser scan")):
         for item in model.query.all():
             files.append({"category": label, "project": item.project,
                           "name": (getattr(item, "original_filename", None)
@@ -4731,6 +4801,8 @@ def admin():
     map_date = parse_date(request.args.get("map_date")) or latest_project_date or now_utc().date()
     map_paths = ProjectFlightPath.query.filter_by(project=selected_map_project, date=map_date).order_by(ProjectFlightPath.created_at).all() if selected_map_project else []
     map_project_flights = Flight.query.filter_by(project=selected_map_project, date=map_date).order_by(Flight.title).all() if selected_map_project else []
+    map_scans = project_scans_blueprint.team_scans_for(selected_map_project, map_date)
+    map_scan_dates = project_scans_blueprint.team_scan_dates(selected_map_project)
     template_name = "site_capture.html" if request.path in {"/admin/site-capture", "/admin/upload"} else "admin.html"
     return render_template(template_name, users=users, flights=flights, docs=docs, audit_logs=audit_logs,
                            project_names=sorted(project_names, key=str.casefold), access_rows=access_rows,
@@ -4744,6 +4816,7 @@ def admin():
                            selected_map_pins=selected_map_pins, map_directions=MAP_DIRECTIONS,
                            selected_site_setup=selected_site_setup, map_date=map_date,
                            map_paths=map_paths, map_project_flights=map_project_flights, assignments=assignments,
+                           map_scans=map_scans, map_scan_dates=map_scan_dates,
                            features={key: company_feature_enabled(key) for key in PLAN_FEATURES},
                            current_time=now_utc(),
                            r2_multipart_enabled=cloud_storage_enabled(),
@@ -5251,6 +5324,9 @@ def upload_batch():
 R2_UPLOAD_PART_SIZE = 64 * 1024 * 1024
 # Media-library uploads reuse UploadTransfer (so quota counts them) with this direction.
 MEDIA_TRANSFER_DIRECTION = "__media__"
+# Laser-scan uploads (Site capture) reuse it the same way.
+SCAN_TRANSFER_DIRECTION = "__scan__"
+NON_FLIGHT_TRANSFER_DIRECTIONS = (MEDIA_TRANSFER_DIRECTION, SCAN_TRANSFER_DIRECTION)
 R2_UPLOAD_LIFETIME = timedelta(hours=24)
 
 
@@ -5322,7 +5398,7 @@ def start_r2_upload():
         return jsonify({"error": "This workspace is not active for uploads."}), 403
     existing = (UploadTransfer.query.filter_by(company_id=company.id, user_id=current_user.id,
                                                 fingerprint=fingerprint)
-                .filter(UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION)
+                .filter(UploadTransfer.direction.notin_(NON_FLIGHT_TRANSFER_DIRECTIONS))
                 .order_by(UploadTransfer.created_at.desc()).first())
     if existing and existing.status == "uploading" and existing.expires_at > now_utc():
         try:
@@ -5377,7 +5453,7 @@ def start_r2_upload():
 def r2_upload_part_url(upload_id):
     transfer = UploadTransfer.query.filter_by(id=upload_id, company_id=current_company_id(),
                                                user_id=current_user.id, status="uploading").filter(
-        UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION).first_or_404()
+        UploadTransfer.direction.notin_(NON_FLIGHT_TRANSFER_DIRECTIONS)).first_or_404()
     if not user_can_upload_project(transfer.project, transfer.company_id):
         abort(403)
     if transfer.expires_at <= now_utc() or not transfer.multipart_upload_id:
@@ -5405,7 +5481,7 @@ def r2_upload_part_url(upload_id):
 def complete_r2_upload(upload_id):
     transfer = UploadTransfer.query.filter_by(id=upload_id, company_id=current_company_id(),
                                                user_id=current_user.id).filter(
-        UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION).first_or_404()
+        UploadTransfer.direction.notin_(NON_FLIGHT_TRANSFER_DIRECTIONS)).first_or_404()
     if not user_can_upload_project(transfer.project, transfer.company_id):
         abort(403)
     if transfer.status == "completed" and transfer.flight_id:
@@ -5486,7 +5562,7 @@ def complete_r2_upload(upload_id):
 def abort_r2_upload(upload_id):
     transfer = UploadTransfer.query.filter_by(id=upload_id, company_id=current_company_id(),
                                           user_id=current_user.id, status="uploading").filter(
-        UploadTransfer.direction != MEDIA_TRANSFER_DIRECTION).first_or_404()
+        UploadTransfer.direction.notin_(NON_FLIGHT_TRANSFER_DIRECTIONS)).first_or_404()
     if not user_can_upload_project(transfer.project, transfer.company_id):
         abort(403)
     try:
@@ -6380,6 +6456,9 @@ from walkthrough import create_walkthrough_blueprint  # noqa: E402
 app.register_blueprint(create_walkthrough_blueprint(sys.modules[__name__]))
 from media_library import create_media_library_blueprint  # noqa: E402
 app.register_blueprint(create_media_library_blueprint(sys.modules[__name__]))
+from project_scans import create_project_scans_blueprint  # noqa: E402
+project_scans_blueprint = create_project_scans_blueprint(sys.modules[__name__])
+app.register_blueprint(project_scans_blueprint)
 from media_library import ViewerSessionInterface  # noqa: E402
 # The public viewer host gets its own session cookie (name and signing salt), so a
 # viewer session can never be presented to the platform or the other way round.

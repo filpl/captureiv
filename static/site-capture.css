@@ -72,3 +72,35 @@
 /* Named site boundary editor */
 .site-boundary-editor{display:flex;align-items:end;flex-wrap:wrap;gap:8px;padding:10px 0 12px;margin:0 0 10px;border-bottom:1px solid #edf0ed}.site-boundary-editor>label{display:flex;flex-direction:column;gap:5px;min-width:min(300px,100%);font-size:10px;font-weight:600;color:#536159}.site-boundary-editor input{height:32px;min-width:260px;max-width:360px;border:1px solid #dce3dd;border-radius:5px;padding:0 9px;font:11px 'DM Sans',sans-serif;color:#26332b}.site-boundary-editor input:focus{outline:2px solid #2b8059;outline-offset:1px}.site-boundary-editor [role=status]{font-size:10px;color:#65736a;padding:0 0 8px}.boundary-name-caption{display:block;margin-top:4px;color:#65736a;font-size:10px}
 @media(max-width:700px){.site-boundary-editor{align-items:stretch}.site-boundary-editor>label{width:100%}.site-boundary-editor input{min-width:0;max-width:none;width:100%}.site-boundary-editor [role=status]{width:100%;padding:2px 0}}
+/* Laser scan background (per flight date) */
+.scan-box{margin:10px 0 14px;padding:14px 16px;border:1px solid #dce3dd;border-radius:10px;background:#fff}
+.scan-box-head{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:flex-start}
+.scan-box h3{margin:2px 0 4px;font-size:15px}
+.scan-box .muted{margin:0;font-size:11px;color:#65736a;max-width:560px}
+.scan-dates{display:flex;flex-wrap:wrap;gap:6px;max-width:420px}
+.scan-date{padding:4px 9px;border:1px solid #dce3dd;border-radius:999px;font-size:10.5px;font-weight:600;color:#26332b;text-decoration:none;background:#fff}
+.scan-date.is-active,.scan-date:hover{background:#26332b;border-color:#26332b;color:#fff}
+.scan-list{display:grid;gap:10px;margin-top:12px}
+.scan-list:empty{display:none}
+.scan-item{display:grid;grid-template-columns:132px 1fr;gap:12px;align-items:start;padding:10px;border:1px solid #e4eae5;border-radius:9px;background:#fbfcfb}
+.scan-item img,.scan-thumb-empty{width:132px;aspect-ratio:16/9;object-fit:cover;border-radius:6px;background:#eef2f8;display:grid;place-items:center;color:#65736a;font-weight:700;font-size:12px}
+.scan-item-body{display:grid;gap:6px;min-width:0}
+.scan-item-body strong{font-size:13px}
+.scan-status{font-size:11px;color:#65736a}
+.scan-status-processing{color:#a8650a}
+.scan-status-error{color:#b23a3a}
+.scan-controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:11px;font-weight:600}
+.scan-toggle,.scan-opacity{display:inline-flex;align-items:center;gap:6px}
+.scan-opacity input{width:110px}
+.scan-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.scan-actions form{margin:0}
+.scan-delete{color:#b23a3a}
+.scan-upload{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin-top:12px;padding-top:12px;border-top:1px dashed #dce3dd}
+.scan-upload label{display:grid;gap:4px;font-size:11px;font-weight:600;color:#26332b}
+.scan-upload label small{font-weight:400;color:#65736a}
+.scan-upload input[name=name]{min-width:220px;height:30px;border:1px solid #dce3dd;border-radius:5px;padding:0 9px;font:11px 'DM Sans',sans-serif}
+.scan-progress{position:relative;flex-basis:100%;height:22px;border-radius:999px;background:#eef2ef;overflow:hidden;border:1px solid #dce3dd}
+.scan-progress span{position:absolute;inset:0 auto 0 0;width:0;background:#2b8059;transition:width .2s}
+.scan-progress b{position:relative;display:block;text-align:center;line-height:20px;font-size:10.5px;color:#fff;mix-blend-mode:difference}
+.scan-upload-error{flex-basis:100%;margin:0;color:#b23a3a;font-size:11px}
+@media(max-width:700px){.scan-item{grid-template-columns:1fr}.scan-item img,.scan-thumb-empty{width:100%}.scan-upload input[name=name]{min-width:0;width:100%}.scan-upload label{width:100%}}

@@ -636,3 +636,11 @@ body.viewer-page{height:100vh;height:100dvh;min-height:0;overflow:hidden;backgro
 .media-area-tab{border:1px solid #d7dee2;background:#fff;color:#4a5962;border-radius:20px;padding:7px 15px;font:600 12px 'DM Sans',sans-serif;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}
 .media-area-tab:hover{border-color:#1769d2;color:#1769d2}
 .media-area-tab.active{background:#1769d2;border-color:#1769d2;color:#fff}
+
+/* Laser scan for the selected date: show/hide and open in 3D. */
+.stage-toolbar .scan-toggle,.stage-toolbar .scan-3d{display:inline-flex;align-items:center;padding:8px 12px;border:1px solid #74849a;background:#f8fafc;color:#25374f;font-weight:700;font-size:10px;text-decoration:none;cursor:pointer}
+.stage-toolbar .scan-toggle[aria-pressed=true]{border-color:#4c8bea;background:#eaf2ff;color:#1f5fb5}
+.stage-toolbar .scan-toggle.is-off{background:#fff;color:#6a7686;border-color:#cbd6e3}
+.stage-toolbar .scan-3d:hover,.stage-toolbar .scan-toggle:hover{border-color:#4c8bea;color:#1f5fb5}
+.compare-scan-3d{position:absolute;z-index:600;left:12px;bottom:12px;padding:7px 11px;border-radius:7px;border:1px solid #cbd6e3;background:#fffffff2;color:#1f5fb5;font-size:10px;font-weight:700;text-decoration:none;box-shadow:0 3px 12px #14223818}
+.compare-scan-3d:hover{background:#eaf2ff}

@@ -16,6 +16,21 @@
   }
   const paths=JSON.parse($('#viewer-flight-paths')?.textContent||'[]'),colors=['#e17749','#397d59','#4c83c8','#8b66a5'];
   const pathsByDate=JSON.parse($('#viewer-flight-paths-by-date')?.textContent||'{}');
+  // Laser scans: a georeferenced top-down overlay per date, drawn under that date's flight paths.
+  let scansByDate={};try{scansByDate=JSON.parse($('#viewer-scans-by-date')?.textContent||'{}')||{}}catch{scansByDate={}}
+  const mappedScan=day=>(scansByDate[day]||[]).find(scan=>scan&&scan.overlay&&Array.isArray(scan.bounds));
+  const scanLayer=(targetMap,day)=>{
+    const scan=mappedScan(day);if(!scan)return null;
+    if(!targetMap.getPane('scanPane')){targetMap.createPane('scanPane');targetMap.getPane('scanPane').style.zIndex=320;targetMap.getPane('scanPane').style.pointerEvents='none'}
+    return L.imageOverlay(scan.overlay,scan.bounds,{pane:'scanPane',interactive:false,alt:scan.name||'Laser scan'}).addTo(targetMap);
+  };
+  const mainScan=scanLayer(map,date);
+  if(mainScan&&!root.dataset.orthoUrl)map.whenReady(()=>{if(!map.getBounds().intersects(mainScan.getBounds()))map.fitBounds(mainScan.getBounds(),{padding:[24,24],maxZoom:20})});
+  $('#viewer-scan-toggle')?.addEventListener('click',event=>{
+    const button=event.currentTarget,on=button.getAttribute('aria-pressed')!=='true';
+    button.setAttribute('aria-pressed',String(on));button.classList.toggle('is-off',!on);
+    if(mainScan){if(on)mainScan.addTo(map);else mainScan.remove()}
+  });
   let selectedRouteLine=null,selectedRouteMarker=null;
   const selectRoute=(path,line,marker,latlng)=>{
     selectedRouteLine?.setStyle({weight:4,opacity:.92});
@@ -117,12 +132,23 @@
       L.marker(path.points[0],{icon,keyboard:true,title:label}).addTo(routeLayer).on('click',openVideo);
     });
   };
+  const setCompareScan=(pane,day)=>{
+    pane.scanHolder.layer?.remove();pane.scanHolder.layer=scanLayer(pane.map,day);
+    const container=pane.map.getContainer().parentElement,scan=(scansByDate[day]||[])[0];
+    pane.scanHolder.link?.remove();pane.scanHolder.link=null;
+    if(scan&&scan.view3d&&container){
+      const link=document.createElement('a');link.className='compare-scan-3d';link.href=scan.view3d;link.textContent='Open scan in 3D';
+      container.appendChild(link);pane.scanHolder.link=link;
+    }
+  };
+  const hasRoutes=day=>(pathsByDate[day]||[]).some(path=>Array.isArray(path.points)&&path.points.length>1);
   const createCompareMap=(elementId,routeDate)=>{
     const paneMap=L.map(elementId,{zoomControl:false,scrollWheelZoom:true,zoomSnap:.5,zoomDelta:.5}).setView(map.getCenter(),map.getZoom());
     L.control.zoom({position:'topright'}).addTo(paneMap);
     paneMap.createPane('basemapPane');paneMap.getPane('basemapPane').style.zIndex=200;
     paneMap.createPane('referencePane');paneMap.getPane('referencePane').style.zIndex=250;
     const routeLayer=L.layerGroup().addTo(paneMap);
+    const scanHolder={layer:null,link:null};
     if(module==='image'){
       if(root.dataset.imageUrl)L.imageOverlay(root.dataset.imageUrl,imageBounds||map.getBounds(),{pane:'referencePane'}).addTo(paneMap);
     }else if(module==='ortho'){
@@ -142,15 +168,18 @@
       });
     }
     addCompareRoutes(paneMap,routeLayer,routeDate);
-    return {map:paneMap,routeLayer};
+    const pane={map:paneMap,routeLayer,scanHolder};
+    setCompareScan(pane,routeDate);
+    return pane;
   };
   const refreshCompareDates=()=>{
     const leftDate=$('#compare-date-left')?.value,rightDate=$('#compare-date-right')?.value;
     if(compareMaps.length===2){
       addCompareRoutes(compareMaps[0].map,compareMaps[0].routeLayer,leftDate);
       addCompareRoutes(compareMaps[1].map,compareMaps[1].routeLayer,rightDate);
-      $('#compare-empty-left').hidden=!(pathsByDate[leftDate]||[]).some(path=>Array.isArray(path.points)&&path.points.length>1);
-      $('#compare-empty-right').hidden=!(pathsByDate[rightDate]||[]).some(path=>Array.isArray(path.points)&&path.points.length>1);
+      setCompareScan(compareMaps[0],leftDate);setCompareScan(compareMaps[1],rightDate);
+      $('#compare-empty-left').hidden=hasRoutes(leftDate)||!!mappedScan(leftDate);
+      $('#compare-empty-right').hidden=hasRoutes(rightDate)||!!mappedScan(rightDate);
     }
   };
   const initializeCompare=()=>{

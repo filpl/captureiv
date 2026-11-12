@@ -55,6 +55,23 @@ pages or sessions with the platform.
 5. Large uploads go straight to R2 in resumable parts (up to `MAX_CONTENT_LENGTH`,
    8 GB by default) whenever `STORAGE_BACKEND=r2`.
 
+## 2c. Laser scans on the project map
+
+Admins upload LAS, LAZ or E57 scans per project and flight date on **Site capture**. Each upload is
+converted in the background (one at a time per machine, in a separate process) into a georeferenced
+map overlay that sits under that date's flight paths, a streamed 3D copy, and a thumbnail. Clients see
+the scan on their Flight Scans map, when comparing dates, and in the 3D view.
+
+- Memory: a 10M-point LAZ peaks at about 300 MB in the converter. Use an instance with at least 2 GB
+  (Render Standard). `SCAN_CONVERT_MEMORY_MB` (default 1400) caps the converter's address space so an
+  oversized or malformed file fails its conversion instead of the instance; lower it on smaller plans.
+- `SCAN_MAX_POINTS` (default 2,000,000) sets how many points the 3D copy keeps. The original file is
+  always kept for download.
+- Map placement needs a coordinate system in the file (standard for survey LAS/LAZ). Scans without
+  one, and E57 files, open in 3D only. E57 setups over 5 million points are refused; export LAZ.
+- R2 CORS: the 3D viewer reads the converted file from R2 through a signed redirect, so the platform
+  origin needs `GET` in the bucket's CORS rules (already covered by the upload rule above).
+
 ## 3. Configure Stripe in test mode first
 
 Use a Stripe test account/key and a test webhook endpoint before enabling live
