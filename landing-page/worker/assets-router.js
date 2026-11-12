@@ -56,6 +56,12 @@ export default {
     const url = new URL(request.url);
     const redirect = canonicalRedirect(url, request.method);
     if (redirect) return redirect;
+    // Legal pages live on the platform; old portal page retired.
+    const legalPaths = {'/privacy': 'privacy', '/terms': 'terms', '/cookies': 'cookies', '/legal': '', '/accessibility': 'accessibility'};
+    if (url.pathname in legalPaths) {
+      return secure(Response.redirect(`https://app.captureiv.com/legal${legalPaths[url.pathname] ? '/' + legalPaths[url.pathname] : ''}`, 301));
+    }
+    if (url.pathname === '/portal.html') return secure(Response.redirect(new URL(env.PLATFORM_LOGIN_URL || '/', request.url).href, 301));
     if (url.pathname === '/portal') {
       return secure(Response.redirect(new URL(env.PLATFORM_LOGIN_URL || '/', request.url).href, 302));
     }
