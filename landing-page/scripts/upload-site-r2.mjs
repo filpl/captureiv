@@ -11,7 +11,8 @@ if (!account || !token) throw Error('Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_AP
 const dir = path.resolve('dist/assets');
 const api = `https://api.cloudflare.com/client/v4/accounts/${account}/r2/buckets/${bucket}/objects`;
 const types = {html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8',
-  svg: 'image/svg+xml', jpg: 'image/jpeg', png: 'image/png', mp4: 'video/mp4'};
+  svg: 'image/svg+xml', jpg: 'image/jpeg', png: 'image/png', mp4: 'video/mp4',
+  xml: 'application/xml; charset=utf-8', txt: 'text/plain; charset=utf-8'};
 const auth = {Authorization: `Bearer ${token}`};
 
 const files = fs.readdirSync(dir).filter(f => types[f.split('.').pop()]);
