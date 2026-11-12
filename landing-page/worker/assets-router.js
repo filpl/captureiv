@@ -9,8 +9,16 @@ const security = {
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Frame-Options': 'SAMEORIGIN',
   'Strict-Transport-Security': 'max-age=31536000',
-  'Content-Security-Policy': "frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'",
+  // Only this site's own scripts (plus Cloudflare Web Analytics) run; fonts come from Google Fonts; nothing else is loaded.
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src 'self' https://fonts.gstatic.com; img-src 'self'; media-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src 'none'; " +
+    "frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; upgrade-insecure-requests",
+  'Permissions-Policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
 };
+// RFC 9116 security contact, served at /.well-known/security.txt.
+const SECURITY_TXT = 'Contact: mailto:support@captureiv.com\nExpires: 2027-11-12T00:00:00.000Z\nPreferred-Languages: en\n' +
+  'Canonical: https://www.captureiv.com/.well-known/security.txt\nPolicy: https://www.captureiv.com/contact\n';
 const aliases = {
   '/': 'index.html', '/platform': 'platform.html', '/solutions': 'solutions.html',
   '/clients': 'clients.html', '/about': 'about.html', '/about-us': 'about.html',
@@ -50,6 +58,10 @@ export default {
     if (redirect) return redirect;
     if (url.pathname === '/portal') {
       return secure(Response.redirect(new URL(env.PLATFORM_LOGIN_URL || '/', request.url).href, 302));
+    }
+    if (url.pathname === '/.well-known/security.txt' || url.pathname === '/security.txt') {
+      return secure(new Response(request.method === 'HEAD' ? null : SECURITY_TXT,
+        {headers: {'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=86400'}}));
     }
     if (url.pathname === '/api/contact') return secure(await contact(request, env));
     if (!['GET', 'HEAD'].includes(request.method)) {

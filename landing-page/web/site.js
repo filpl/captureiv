@@ -125,3 +125,6 @@ if(platformDemo){
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',build);else build();
 })();
+
+// Sound on/off for the walkthrough video (Home and Solutions).
+document.querySelectorAll('.home-action-sound').forEach(b=>{const v=document.getElementById('home-action-vid')||document.getElementById('sol-action-vid');if(!v)return;b.addEventListener('click',()=>{v.muted=!v.muted;const on=!v.muted;b.setAttribute('aria-pressed',String(on));b.setAttribute('aria-label',on?'Turn sound off':'Turn sound on');const tx=b.querySelector('.home-action-sound-tx');if(tx)tx.textContent=on?'Sound on':'Sound off';if(on){const pr=v.play();if(pr&&pr.catch)pr.catch(()=>{});}});});
