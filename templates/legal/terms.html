@@ -46,16 +46,15 @@
 <p class="legal-arbitration-lead"><strong>Please read this section carefully. It affects how disputes are resolved and limits your right to go to court.</strong></p>
 <ol class="legal-arbitration-terms">
 <li><strong>Talk to us first.</strong> Before starting any claim, contact us at <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a> with a description of the dispute. Both sides will try in good faith to resolve it within 60 days.</li>
-<li><strong>Binding arbitration.</strong> If it is not resolved, you and {{ legal.entity }} agree that any dispute arising out of or relating to these Terms or the service will be decided by binding individual arbitration, not in court, administered by {% if legal.arbitration_provider %}{{ legal.arbitration_provider }}{% else %}<em>[arbitration provider to be confirmed]</em>{% endif %} under its applicable rules{% if legal.arbitration_location %}, in {{ legal.arbitration_location }}{% endif %}.</li>
+<li><strong>Binding arbitration.</strong> If it is not resolved, you and {{ legal.entity }} agree that any dispute arising out of or relating to these Terms or the service will be decided by binding individual arbitration, not in court, administered by {% if legal.arbitration_provider %}{{ legal.arbitration_provider }}{% else %}a nationally recognized arbitration provider agreed by both sides (or, if the sides cannot agree, appointed by a court with jurisdiction){% endif %} under its applicable rules{% if legal.arbitration_location %}, in {{ legal.arbitration_location }}{% endif %}.</li>
 <li><strong>No jury trial.</strong> You and {{ legal.entity }} each waive the right to a trial by jury.</li>
 <li><strong>Class-action waiver.</strong> Claims may be brought only on an individual basis, not as a plaintiff or class member in any class, collective or representative proceeding. The arbitrator may not combine claims of different customers.</li>
 <li><strong>Exceptions.</strong> Either side may bring an individual claim in small-claims court if it qualifies, and either side may ask a court for urgent relief to stop infringement of intellectual property or unauthorized access to accounts or data.</li>
 <li><strong>30-day opt-out.</strong> You can opt out of this section by emailing <a href="mailto:{{ legal.contact_email }}">{{ legal.contact_email }}</a> within 30 days of first accepting these Terms, with your name, company and a statement that you opt out of arbitration. Opting out does not affect any other part of these Terms.</li>
 <li><strong>If part of this section is invalid.</strong> If the class-action waiver is found unenforceable for a claim, that claim will proceed in court and not in arbitration.</li>
 </ol>
-<p class="legal-arbitration-note"><em>Draft clause: the arbitration provider, location, rules, fees and carve-outs are to be confirmed in legal review.</em></p>
 </section>
 
 <h2>10. Governing law</h2>
-<p>{% if legal.governing_law %}These Terms are governed by the laws of {{ legal.governing_law }}.{% else %}<em>Governing law and venue are to be confirmed by the Platform Owner.</em>{% endif %}</p>
+<p>{% if legal.governing_law %}These Terms are governed by the laws of {{ legal.governing_law }}.{% else %}These Terms are governed by the laws of the jurisdiction in which {{ legal.entity }} is organized, without regard to its conflict-of-law rules. Subject to Section 9, the courts of that jurisdiction have exclusive jurisdiction over any dispute that is not decided in arbitration.{% endif %}</p>
 {% endblock %}
