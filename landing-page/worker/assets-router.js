@@ -22,7 +22,7 @@ const SECURITY_TXT = 'Contact: mailto:support@captureiv.com\nExpires: 2027-11-12
 const aliases = {
   '/': 'index.html', '/platform': 'platform.html', '/solutions': 'solutions.html',
   '/clients': 'clients.html', '/about': 'about.html', '/about-us': 'about.html',
-  '/contact': 'contact.html', '/pricing': 'pricing.html',
+  '/contact': 'contact.html', '/pricing': 'pricing.html', '/network': 'network.html',
 };
 const types = {
   html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8',
@@ -35,8 +35,14 @@ function secure(response, extra = {}) {
   for (const [name, value] of Object.entries({...security, ...extra})) out.headers.set(name, value);
   return out;
 }
-const notFound = () => secure(new Response('Page not found. Return to Capture IV at /.',
-  {status: 404, headers: {'Content-Type': 'text/plain; charset=utf-8'}}));
+// Branded 404 page from the bucket when available, plain text otherwise.
+const notFound = async env => {
+  const page = env && env.SITE ? await env.SITE.get('404.html') : null;
+  if (page) return secure(new Response(page.body, {status: 404, headers: {'Content-Type': types.html, 'Cache-Control': 'no-cache'}}));
+  return secure(new Response('Page not found. Return to Capture IV at /.',
+    {status: 404, headers: {'Content-Type': 'text/plain; charset=utf-8'}}));
+};
+const cleanPaths = Object.fromEntries(Object.entries(aliases).filter(([p]) => p !== '/about-us').map(([p, f]) => [f, p]));
 
 // The site's one public address. The bare domain and plain http are sent here,
 // keeping the path and query, so visitors always see https://www.captureiv.com.
@@ -74,13 +80,17 @@ export default {
       return secure(new Response('Method not allowed', {status: 405, headers: {Allow: 'GET, HEAD'}}));
     }
     const path = url.pathname.replace(/\/$/, '') || '/';
+    // One address per page: /about/ and /about.html go to /about.
+    if (path !== url.pathname && aliases[path]) return secure(Response.redirect(`https://${url.host}${path}${url.search}`, 301));
+    if (cleanPaths[path.slice(1)]) return secure(Response.redirect(`https://${url.host}${cleanPaths[path.slice(1)]}${url.search}`, 301));
+    if (path === '/404.html') return notFound(env);
     const key = aliases[path] || path.slice(1);
     const ext = key.split('.').pop().toLowerCase();
     // Only flat, known file names are served; nothing else in the bucket is reachable.
-    if (!key || key.includes('/') || key.startsWith('.') || !types[ext]) return notFound();
+    if (!key || key.includes('/') || key.startsWith('.') || !types[ext]) return notFound(env);
 
     const object = await env.SITE.get(key, {range: request.headers, onlyIf: request.headers});
-    if (object === null) return notFound();
+    if (object === null) return notFound(env);
     const headers = new Headers();
     object.writeHttpMetadata(headers);
     headers.set('Content-Type', types[ext]);
@@ -103,7 +113,7 @@ export default {
       } else {
         // Could not express the range safely: send the whole file instead.
         const full = await env.SITE.get(key);
-        if (full === null) return notFound();
+        if (full === null) return notFound(env);
         body = full.body;
         headers.set('Content-Length', String(full.size));
       }

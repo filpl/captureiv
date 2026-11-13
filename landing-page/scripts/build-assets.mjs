@@ -27,7 +27,7 @@ const allowed = new Set(['.html', '.css', '.js', '.svg', '.jpg', '.png', '.mp4']
 // Public address and company facts for search engines (structured data, canonical URLs, sitemap).
 const SITE = 'https://www.captureiv.com';
 const routes = {'index.html': '/', 'platform.html': '/platform', 'solutions.html': '/solutions', 'clients.html': '/clients',
-  'about.html': '/about', 'contact.html': '/contact', 'pricing.html': '/pricing'};
+  'about.html': '/about', 'contact.html': '/contact', 'pricing.html': '/pricing', 'network.html': '/network'};
 const organization = {
   '@context': 'https://schema.org', '@type': 'Organization', '@id': `${SITE}/#organization`,
   name: 'Capture IV', alternateName: 'Capture IV — Intelligence Visuals', url: `${SITE}/`,

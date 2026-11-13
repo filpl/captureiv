@@ -20,7 +20,7 @@ for(const file of fs.readdirSync(web)){
 const contactSource=fs.readFileSync('worker/contact.js','utf8').replace('export async function contact','async function contact');
 const router=`
 const platformLoginURL=${JSON.stringify(loginURL)};
-const aliases={'/':'/index.html','/platform':'/platform.html','/solutions':'/solutions.html','/clients':'/clients.html','/about':'/about.html','/about-us':'/about.html','/contact':'/contact.html','/pricing':'/pricing.html','/portal':'/portal.html'};
+const aliases={'/network':'/network.html','/':'/index.html','/platform':'/platform.html','/solutions':'/solutions.html','/clients':'/clients.html','/about':'/about.html','/about-us':'/about.html','/contact':'/contact.html','/pricing':'/pricing.html','/portal':'/portal.html'};
 const security={'X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN','Strict-Transport-Security':'max-age=31536000','Content-Security-Policy':\"frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'\"};
 export default {async fetch(request,env){
  const url=new URL(request.url);
