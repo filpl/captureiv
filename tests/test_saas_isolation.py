@@ -1,3 +1,4 @@
+from pathlib import Path
 """Small local regression tests for the new SaaS authorization boundary."""
 import os
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -248,7 +249,7 @@ class TenantIsolationTests(unittest.TestCase):
         with admin_client.session_transaction() as state:
             state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
         with patch.dict(os.environ, {"STORAGE_BACKEND": "r2"}):
-            page = admin_client.get("/admin/upload")
+            page = admin_client.get("/admin/upload", follow_redirects=True)
         self.assertIn(b'data-r2-multipart="true"', page.data)
         self.assertIn(b"r2-upload.js", page.data)
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
@@ -286,7 +287,7 @@ class TenantIsolationTests(unittest.TestCase):
             other_client = portal.app.test_client()
             with other_client.session_transaction() as state:
                 state["_user_id"] = str(self.user_b_id); state["_fresh"] = True
-            other_page = other_client.get("/admin/upload")
+            other_page = other_client.get("/admin/upload", follow_redirects=True)
             other_csrf = re.search(rb'name="_csrf" value="([^"]+)"', other_page.data).group(1).decode()
             denied = other_client.post(f"/admin/r2-upload/{transfer_id}/part-url", json={"partNumber": 1},
                                        headers={"X-CSRF-Token": other_csrf})
@@ -358,12 +359,13 @@ class TenantIsolationTests(unittest.TestCase):
         client = portal.app.test_client()
         with client.session_transaction() as state:
             state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
-        response = client.get("/admin/upload")
+        response = client.get("/admin/upload", follow_redirects=True)
         self.assertEqual(response.status_code, 200)
+        # Admins land on Site capture's upload section, which reports progress and errors.
         self.assertIn(b"id=\"footage-form\"", response.data)
-        self.assertIn(b"id=\"upload-progress\"", response.data)
-        self.assertIn(b"id=\"retry-upload\"", response.data)
-        self.assertIn(b"xhr.upload.onprogress", response.data)
+        self.assertIn(b"id=\"batchUploadProgress\"", response.data)
+        self.assertIn(b"id=\"batchUploadError\"", response.data)
+        self.assertIn("onprogress", (Path(portal.app.static_folder) / "site-capture.js").read_text())
         with patch.dict(os.environ, {"STORAGE_BACKEND": "r2"}):
             capture = client.get("/admin/site-capture")
         self.assertEqual(capture.status_code, 200)
@@ -896,7 +898,7 @@ class TenantIsolationTests(unittest.TestCase):
         client = portal.app.test_client()
         with client.session_transaction() as state:
             state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
-        capture_page = client.get(f"/admin/upload?map_project={project}")
+        capture_page = client.get(f"/admin/upload?map_project={project}", follow_redirects=True)
         csrf = re.search(rb'name="_csrf" value="([^\"]+)"', capture_page.data).group(1).decode()
         uploads = MultiDict([
             ("_csrf", csrf), ("project", project), ("pin_id", pin_id),
@@ -1607,7 +1609,7 @@ class TenantIsolationTests(unittest.TestCase):
         with client.session_transaction() as state:
             state["_user_id"] = str(self.user_a_id)
             state["_fresh"] = True
-        page = client.get("/admin/upload")
+        page = client.get("/admin/upload", follow_redirects=True)
         csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
         with patch.dict(os.environ, {"STORAGE_BACKEND": "local"}):
             response = client.post("/admin/upload", data={

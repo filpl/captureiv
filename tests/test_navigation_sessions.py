@@ -57,9 +57,14 @@ class NavigationSessionTests(unittest.TestCase):
 
     def test_company_admin_can_switch_all_pages_without_login(self):
         client = self.client(self.admin)
-        for path, label in [('/dashboard','Projects'),('/admin','Admin'),('/admin/upload','Upload'),
+        for path, label in [('/dashboard','Projects'),('/admin','Admin'),
                             ('/admin/site-capture','Site capture')]:
             self.check_page(client, path, label)
+        # Admins upload drone footage in Site capture; the old Upload page forwards there.
+        moved = client.get('/admin/upload')
+        self.assertEqual(moved.status_code, 302)
+        self.assertEqual(moved.location, '/admin/site-capture#uploads')
+        self.assertNotIn(b'>Upload<', client.get('/admin').data)
         self.assertEqual(client.get('/admin/fieldview-sandbox').status_code, 403)
         self.assertNotIn(b'fieldview-sandbox', client.get('/admin').data)
         with client.session_transaction() as state:
@@ -81,7 +86,7 @@ class NavigationSessionTests(unittest.TestCase):
         for company, visible, hidden in [(self.a,'Only company A','Only company B'), (self.b,'Only company B','Only company A')]:
             response = client.post('/owner/workspace', data={'_csrf':'navigation-csrf','company_id':company,'next_endpoint':'admin'})
             self.assertEqual(response.location, '/admin')
-            for path, label in [('/dashboard','Projects'),('/admin','Admin'),('/admin/upload','Upload')]:
+            for path, label in [('/dashboard','Projects'),('/admin','Admin'),('/admin/site-capture','Site capture')]:
                 html = self.check_page(client, path, label)
                 self.assertIn(visible, html)
                 self.assertNotIn(hidden, html)
