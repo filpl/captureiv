@@ -104,3 +104,5 @@
 .scan-progress b{position:relative;display:block;text-align:center;line-height:20px;font-size:10.5px;color:#fff;mix-blend-mode:difference}
 .scan-upload-error{flex-basis:100%;margin:0;color:#b23a3a;font-size:11px}
 @media(max-width:700px){.scan-item{grid-template-columns:1fr}.scan-item img,.scan-thumb-empty{width:100%}.scan-upload input[name=name]{min-width:0;width:100%}.scan-upload label{width:100%}}
+
+.capture-no-project{margin:6px 0 0;font-size:12px;line-height:1.45;color:#5b6b6a}.capture-no-project a{color:#1d6b4f;font-weight:700;text-decoration:underline}.capture-upload-actions .capture-no-project{margin:0 14px 0 0;align-self:center}
