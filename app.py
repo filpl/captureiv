@@ -4874,10 +4874,10 @@ def upload_project_photo_reference():
     photo = request.files.get("photo_reference")
     if not project or not photo or not photo.filename or extension(photo.filename) not in {"jpg", "jpeg", "png", "webp"}:
         flash("Choose a JPG, PNG, or WebP site image.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#photos")
+        return redirect(f"/admin/site-capture?map_project={quote(project)}#photos")
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#photos")
+        return redirect(f"/admin/site-capture?map_project={quote(project)}#photos")
     stored = None
     try:
         reference = ProjectPhotoReference.query.filter_by(project=project).first()
@@ -4901,7 +4901,7 @@ def upload_project_photo_reference():
             release_storage_reservation(stored[4])
         app.logger.exception("Photo reference upload failed")
         flash("Photo reference upload failed.", "error")
-    return redirect(f"/admin/upload?map_project={quote(project)}#photos")
+    return redirect(f"/admin/site-capture?map_project={quote(project)}#photos")
 
 
 @app.post("/admin/projects/photo-annotations")
@@ -5677,10 +5677,10 @@ def upload_project_map():
     allowed = {"tif", "tiff"} if module == "ortho" else {"jpg", "jpeg", "png", "webp"}
     if not project or module not in {"image", "ortho"} or not map_file or not map_file.filename or extension(map_file.filename) not in allowed:
         flash("Choose an image for Site image mode or a GeoTIFF for Orthomosaic mode.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+        return redirect(f"/admin/site-capture?map_project={quote(project)}#videos")
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+        return redirect(f"/admin/site-capture?map_project={quote(project)}#videos")
     stored = None
     try:
         site_map = ProjectSiteMap.query.filter_by(project=project).first()
@@ -5713,7 +5713,7 @@ def upload_project_map():
             release_storage_reservation(stored[4])
         app.logger.exception("Project map upload failed")
         flash("Map upload failed.", "error")
-    return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+    return redirect(f"/admin/site-capture?map_project={quote(project)}#videos")
 
 
 @app.post("/admin/projects/site-setup")
@@ -5724,8 +5724,10 @@ def save_project_site_setup():
     module = request.form.get("module", "map").strip()
     address = request.form.get("address", "").strip()[:300]
     boundary_name = request.form.get("boundary_name", "").strip()[:160]
-    if not project or module not in {"map", "image", "ortho"}:
-        abort(400, "Choose a project and a valid reference type")
+    if not project:
+        abort(400, "Create your project first: Admin > Client access > Create project and code.")
+    if module not in {"map", "image", "ortho"}:
+        abort(400, "Choose a valid reference type")
     try:
         boundary = json.loads(request.form.get("boundary_json", "[]"))
     except (TypeError, json.JSONDecodeError):
@@ -5748,7 +5750,7 @@ def save_project_site_setup():
         abort(400, "Add a name for the site boundary")
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+        return redirect(f"/admin/site-capture?map_project={quote(project)}#videos")
     try:
         lat = float(request.form.get("center_lat", ""))
         lng = float(request.form.get("center_lng", ""))
@@ -5772,7 +5774,7 @@ def save_project_site_setup():
     db.session.commit()
     audit("site_setup", "project", project, f"Saved {module} site reference")
     flash("Project site setup saved.", "success")
-    return redirect(f"/admin/upload?map_project={quote(project)}#videos")
+    return redirect(f"/admin/site-capture?map_project={quote(project)}#videos")
 
 
 @app.post("/admin/projects/paths")
@@ -5839,7 +5841,7 @@ def save_project_flight_path():
     db.session.commit()
     audit("save_flight_path", "project", project, f"Saved {name} for {date_value}")
     flash("Flight path saved.", "success")
-    return redirect(f"/admin/upload?map_project={quote(project)}&map_date={date_value.isoformat()}#{'overview' if request.form.get('return_to') == 'overview' else 'videos'}")
+    return redirect(f"/admin/site-capture?map_project={quote(project)}&map_date={date_value.isoformat()}#{'overview' if request.form.get('return_to') == 'overview' else 'videos'}")
 
 
 @app.post("/admin/projects/paths/<int:path_id>/delete")
@@ -5851,7 +5853,7 @@ def delete_project_flight_path(path_id):
     db.session.delete(path)
     db.session.commit()
     audit("delete_flight_path", "project", project, f"Deleted route {path.name}")
-    return redirect(f"/admin/upload?map_project={quote(project)}&map_date={date_value.isoformat()}#videos")
+    return redirect(f"/admin/site-capture?map_project={quote(project)}&map_date={date_value.isoformat()}#videos")
 
 
 @app.post("/admin/projects/pins")
@@ -6350,6 +6352,19 @@ def api_audit():
         "resource_type": r.resource_type, "resource_id": r.resource_id,
         "detail": r.detail, "ip_address": r.ip_address, "created_at": r.created_at.isoformat()
     } for r in rows])
+
+
+@app.errorhandler(400)
+def bad_request(error):
+    """Form posts from the app return to the page with the reason instead of a bare error page."""
+    referrer = request.referrer or ""
+    wants_json = (request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+                  or request.accept_mimetypes.best == "application/json")
+    same_site = urlsplit(referrer).netloc == request.host if referrer else False
+    if request.method == "POST" and current_user.is_authenticated and same_site and not wants_json:
+        flash(getattr(error, "description", None) or "That request could not be completed.", "error")
+        return redirect(referrer)
+    return error
 
 
 @app.errorhandler(413)
