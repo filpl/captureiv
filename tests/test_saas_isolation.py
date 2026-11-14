@@ -240,6 +240,37 @@ class TenantIsolationTests(unittest.TestCase):
             portal.db.session.commit()
         portal._last_rate_limit_cleanup = previous_cleanup
 
+    def _restore_storage_limit(self, company_id, limit):
+        with portal.app.app_context():
+            portal.db.session.get(portal.Company, company_id).storage_limit_bytes = limit
+            portal.db.session.commit()
+
+    def test_route_video_r2_upload_accepts_route_directions(self):
+        """Site capture sends spelled-out route directions; they map to the stored short codes."""
+        storage = FakeMultipartStorage()
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
+        with patch.dict(os.environ, {"STORAGE_BACKEND": "r2"}):
+            page = client.get("/admin/upload", follow_redirects=True)
+        csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
+        payload = {"filename": "route-pass.mp4", "size": 2048, "lastModified": 1760918400000,
+                   "project": "A project", "date": "2026-10-19", "direction": "North → South", "title": "Route pass"}
+        with portal.app.app_context():
+            company_id = portal.CompanyMembership.query.filter_by(user_id=self.user_a_id).one().company_id
+            company = portal.db.session.get(portal.Company, company_id)
+            old_limit, company.storage_limit_bytes = company.storage_limit_bytes, 1024 * 1024
+            portal.db.session.commit()
+        self.addCleanup(self._restore_storage_limit, company_id, old_limit)
+        with patch.dict(os.environ, {"STORAGE_BACKEND": "r2"}), patch.object(portal, "R2Storage", return_value=storage):
+            start = client.post("/admin/r2-upload/start", json=payload, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(start.status_code, 200, start.get_data(as_text=True))
+        with portal.app.app_context():
+            transfer = portal.db.session.get(portal.UploadTransfer, start.get_json()["uploadId"])
+            self.assertEqual(transfer.direction, "N-S")
+        self.assertEqual(portal.normalize_direction("Custom path"), "Custom")
+        self.assertEqual(portal.normalize_direction("W-E"), "W-E")
+
     def test_r2_multipart_upload_resumes_enforces_quota_and_is_tenant_scoped(self):
         storage = FakeMultipartStorage()
         payload = {"filename": "site-flight.mp4", "size": 2048, "lastModified": 1760918400000,
