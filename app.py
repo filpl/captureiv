@@ -5675,7 +5675,10 @@ def upload_project_map():
     map_file = request.files.get("map_file")
     module = request.form.get("module", "image").strip()
     allowed = {"tif", "tiff"} if module == "ortho" else {"jpg", "jpeg", "png", "webp"}
-    if not project or module not in {"image", "ortho"} or not map_file or not map_file.filename or extension(map_file.filename) not in allowed:
+    if not project:
+        flash("Create your project first: Admin > Client access > Create project and code.", "error")
+        return redirect(url_for("site_capture") + "#videos")
+    if module not in {"image", "ortho"} or not map_file or not map_file.filename or extension(map_file.filename) not in allowed:
         flash("Choose an image for Site image mode or a GeoTIFF for Orthomosaic mode.", "error")
         return redirect(f"/admin/site-capture?map_project={quote(project)}#videos")
     if not project_capacity_available(project):
