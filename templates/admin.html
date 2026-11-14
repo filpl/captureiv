@@ -11,7 +11,7 @@
     <div><p class="eyebrow">CONTROL ROOM</p><h1>Administration</h1>
       <p class="muted">Client access, team members and project files{% if nav_company %} for {{ nav_company.name }}{% endif %}.</p></div>
     <div class="quick-actions">
-      {% if features.flight_scans %}<a class="button primary small" href="{{ url_for('upload') }}">＋ Upload footage</a>{% endif %}
+      {% if features.flight_scans %}<a class="button primary small" href="{{ url_for('site_capture') if features.site_maps else url_for('upload') }}{{ '#uploads' if features.site_maps else '' }}">＋ Upload footage</a>{% endif %}
       {% if features.site_maps %}<a class="button secondary small" href="{{ url_for('site_capture') }}">Site capture</a>{% endif %}
       {% if nav_services.walkthrough %}<a class="button secondary small" href="{{ url_for('walkthrough.index') }}">Walkthrough setup</a>{% endif %}
     </div>

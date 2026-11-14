@@ -1080,7 +1080,8 @@ def navigation_context():
     nav_tools = {}
     if company_id and current_user.is_authenticated:
         nav_tools["site_capture"] = bool(current_user.is_admin and company_feature_enabled("site_maps", company_id))
-        nav_tools["upload"] = bool(company_feature_enabled("flight_scans", company_id) and (
+        # Users with Site capture upload there; the separate Upload page is for everyone else.
+        nav_tools["upload"] = bool(not nav_tools["site_capture"] and company_feature_enabled("flight_scans", company_id) and (
             current_user.is_admin or ProjectAssignment.query.filter_by(
                 company_id=company_id, user_id=current_user.id).first() is not None))
     return {"nav_section": section, "nav_company": membership.company if membership else None,
@@ -4974,6 +4975,10 @@ def rotate_project_access_codes():
 @upload_user_required
 @company_feature_required("flight_scans")
 def upload():
+    if request.method == "GET" and current_user.is_admin and company_feature_enabled("site_maps"):
+        # Drone footage is uploaded from Site capture; this page stays for employees without it.
+        params = {k: request.args[k] for k in ("map_project", "map_date") if request.args.get(k)}
+        return redirect(url_for("site_capture", **params) + "#uploads")
     if request.method == "GET":
         project_names = {r[0] for r in db.session.query(Flight.project).distinct().all() if r[0]}
         project_names.update(r[0] for r in db.session.query(ProjectFile.project).distinct().all() if r[0])
