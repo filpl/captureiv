@@ -195,7 +195,16 @@ login_manager.login_message = "Please sign in to continue."
 
 ALLOWED_VIDEO = {"mp4", "mov", "m4v", "webm", "avi"}
 ALLOWED_DOCS = {"pdf", "jpg", "jpeg", "png", "csv", "xlsx", "docx", "txt", "zip"}
-DIRECTIONS = ["W-E", "S-N", "SW-N", "SW-E", "E-SW"]
+DIRECTIONS = ["W-E", "S-N", "SW-N", "SW-E", "E-SW", "N-S", "E-W", "NW-SE", "NE-SW", "Custom"]
+# Site capture routes use spelled-out directions; videos uploaded for a route store the short code.
+ROUTE_DIRECTION_CODES = {"North → South": "N-S", "South → North": "S-N", "Northwest → Southeast": "NW-SE",
+                         "Northeast → Southwest": "NE-SW", "East → West": "E-W", "West → East": "W-E",
+                         "Custom path": "Custom"}
+
+
+def normalize_direction(value):
+    value = str(value or "").strip()
+    return ROUTE_DIRECTION_CODES.get(value, value)
 MAP_DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 
@@ -5197,7 +5206,7 @@ def start_r2_upload():
     original = safe_name(str(payload.get("filename", "")))
     date_value = parse_date(payload.get("date"))
     project = str(payload.get("project", "")).strip()[:160]
-    direction = str(payload.get("direction", "")).strip()[:40]
+    direction = normalize_direction(str(payload.get("direction", ""))[:40])
     title = str(payload.get("title", "")).strip()[:200] or Path(original).stem[:200]
     area = str(payload.get("area", "")).strip()[:160]
     try:
@@ -5414,7 +5423,9 @@ def upload_route_video():
     date_value = parse_date(request.form.get("date", ""))
     video = request.files.get("video")
     title = request.form.get("title", "").strip()[:200]
-    direction = request.form.get("direction", "Custom path").strip()[:40]
+    direction = normalize_direction(request.form.get("direction", "Custom path")[:40])
+    if direction not in DIRECTIONS:
+        direction = "Custom"
     if not project or not date_value or not video or not video.filename or not ext_allowed(video.filename, ALLOWED_VIDEO):
         return jsonify({"error": "Choose a valid project date and an MP4, MOV, M4V, WEBM, or AVI video."}), 400
     if not video_signature_valid(video.stream, video.filename):
@@ -5748,7 +5759,7 @@ def edit_flight(flight_id):
         return redirect(url_for("admin"))
     flight.project = target_project
     flight.area = request.form.get("area", flight.area).strip()[:160]
-    flight.direction = request.form.get("direction", flight.direction).strip()
+    flight.direction = normalize_direction(request.form.get("direction", flight.direction))
     if flight.direction not in DIRECTIONS:
         abort(400, "Invalid direction")
     flight.tags = json.dumps(tags_from_request())
