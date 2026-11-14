@@ -4843,24 +4843,28 @@ def create_project_access():
         abort(400, "Project is required")
     if not user_can_upload_project(project):
         abort(403)
+    # Site capture's "create your project" form returns there; Admin stays the default.
+    back = (url_for("site_capture", map_project=project) + "#videos"
+            if request.form.get("return_to") == "site_capture" and current_user.is_admin
+            else url_for("admin") + "#project-access")
     code_value = request.form.get("access_keyword", "").strip()[:80]
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{3,79}", code_value):
         flash("Enter an access code of 4-80 characters "
               "(letters, numbers, spaces, hyphens or underscores).", "error")
-        return redirect(url_for("admin") + "#project-access")
+        return redirect(back)
     if not project_capacity_available(project):
         flash("The project limit for this plan has been reached.", "error")
-        return redirect(url_for("admin"))
+        return redirect(back)
     raw_expiration = request.form.get("expires_on", "").strip()
     expiration_date = parse_date(raw_expiration) if raw_expiration else None
     if raw_expiration and not expiration_date:
         flash("Choose a valid viewer-link expiration date.", "error")
-        return redirect(url_for("admin") + "#project-access")
+        return redirect(back)
     try:
         recipients = normalize_client_emails(request.form.get("client_emails", ""))
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(url_for("admin") + "#project-access")
+        return redirect(back)
     access = ProjectAccess.query.filter_by(project=project).first()
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
     for _ in range(100):
@@ -4905,7 +4909,7 @@ def create_project_access():
             note += f" {len(recipients)} email(s) are allow-listed for Google sign-in."
     flash(f"Link + code access created for {project}." + note +
           " Re-save here any time to issue a fresh link and code.", "success")
-    return redirect(url_for("admin") + "#project-access")
+    return redirect(back)
 
 
 @app.post("/admin/projects/access/<int:access_id>/revoke")
