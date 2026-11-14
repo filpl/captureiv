@@ -245,6 +245,25 @@ class TenantIsolationTests(unittest.TestCase):
             portal.db.session.get(portal.Company, company_id).storage_limit_bytes = limit
             portal.db.session.commit()
 
+    def test_site_image_bounds_are_saved_for_editor_and_viewer(self):
+        client = portal.app.test_client()
+        with client.session_transaction() as state:
+            state["_user_id"] = str(self.user_a_id); state["_fresh"] = True
+        page = client.get("/admin/site-capture?map_project=A%20project")
+        csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
+        bounds = [[40.27, -76.89], [40.28, -76.88]]
+        saved = client.post("/admin/projects/site-image-bounds", json={"project": "A project", "bounds": bounds},
+                            headers={"X-CSRF-Token": csrf})
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        bad = client.post("/admin/projects/site-image-bounds", json={"project": "A project", "bounds": [[41, 0], [40, 1]]},
+                          headers={"X-CSRF-Token": csrf})
+        self.assertEqual(bad.status_code, 400)
+        with portal.app.app_context():
+            setup = portal.ProjectSiteSetup.query.filter_by(project="A project").first()
+            self.assertEqual(json.loads(setup.image_bounds_json), bounds)
+        page = client.get("/admin/site-capture?map_project=A%20project")
+        self.assertIn(b'data-image-bounds="[[40.27, -76.89], [40.28, -76.88]]"', page.data)
+
     def test_route_video_r2_upload_accepts_route_directions(self):
         """Site capture sends spelled-out route directions; they map to the stored short codes."""
         storage = FakeMultipartStorage()

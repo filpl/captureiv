@@ -10,7 +10,7 @@
   <div class="video-rows" id="video-rows">
     <div class="video-upload-row">
       <label class="video-dropcard"><input type="file" name="videos" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo" required><span class="dropcard-icon">＋</span><strong class="dropcard-name">Drop video here or browse</strong><small>MP4, MOV, M4V, WEBM, or AVI</small></label>
-      <div class="video-label-fields"><label>Flight title<input name="titles" maxlength="200" placeholder="e.g. North Flight"></label><label>Direction<select name="directions" required>{% for direction in directions %}<option value="{{ direction }}">{{ direction }}</option>{% endfor %}</select></label></div>
+      <div class="video-label-fields"><label>Flight title<input name="titles" maxlength="200" placeholder="e.g. North Flight"></label><label>Direction<select name="directions" required>{% for direction in directions %}<option value="{{ direction }}">{{ direction_labels.get(direction, direction) }}</option>{% endfor %}</select></label></div>
       <button class="remove-video" type="button" aria-label="Remove video row" title="Remove row" disabled>×</button>
     </div>
   </div>
