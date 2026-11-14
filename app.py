@@ -205,6 +205,11 @@ ROUTE_DIRECTION_CODES = {"North → South": "N-S", "South → North": "S-N", "No
 def normalize_direction(value):
     value = str(value or "").strip()
     return ROUTE_DIRECTION_CODES.get(value, value)
+
+
+DIRECTION_LABELS = {"W-E": "West → East", "E-W": "East → West", "S-N": "South → North", "N-S": "North → South",
+                    "SW-N": "Southwest → North", "SW-E": "Southwest → East", "E-SW": "East → Southwest",
+                    "NW-SE": "Northwest → Southeast", "NE-SW": "Northeast → Southwest", "Custom": "Custom path"}
 MAP_DIRECTIONS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 
@@ -243,6 +248,7 @@ WALKTHROUGH_CAPTURE_SCHEMA_REVISION = "0021_walkthrough_field_capture"
 SHARE_KEYWORD_SCHEMA_REVISION = "0022_share_keyword_email_gate"
 EMAIL_OPTOUT_SCHEMA_REVISION = "0023_email_opt_out"
 SHARE_LINK_CODE_SCHEMA_REVISION = "0024_share_link_code_mode"
+SITE_IMAGE_BOUNDS_SCHEMA_REVISION = "0027_site_image_bounds"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 
@@ -384,6 +390,8 @@ class ProjectSiteSetup(db.Model):
     locked = db.Column(db.Boolean, default=True, nullable=False)
     boundary_json = db.Column(db.Text, nullable=False, default="[]")
     boundary_name = db.Column(db.String(160), nullable=False, default="")
+    # Where the site image sits on the map ([[south, west], [north, east]]), shared by editor and client viewer.
+    image_bounds_json = db.Column(db.Text, nullable=False, default="")
     updated_at = db.Column(db.DateTime, default=now_utc, onupdate=now_utc, nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
     __table_args__ = (db.UniqueConstraint("company_id", "project", name="uq_project_site_setup_company_project"),)
@@ -987,6 +995,11 @@ app.jinja_env.globals["legal_url"] = legal_url
 app.jinja_env.globals["annual_billing_enabled"] = annual_billing_enabled
 
 DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(24))
+
+
+@app.context_processor
+def direction_label_context():
+    return {"direction_labels": DIRECTION_LABELS}
 
 
 @app.after_request
@@ -1929,6 +1942,7 @@ def migrate_sqlite():
         apply_demo_workspace_schema_migration()
         apply_site_boundary_migration()
         apply_site_boundary_name_migration()
+        apply_site_image_bounds_migration()
         apply_project_code_email_migration()
         apply_share_keyword_migration()
         apply_email_optout_migration()
@@ -2042,6 +2056,7 @@ def migrate_sqlite():
     apply_billing_period_start_migration()
     apply_site_boundary_migration()
     apply_site_boundary_name_migration()
+    apply_site_image_bounds_migration()
     apply_project_code_email_migration()
     apply_share_keyword_migration()
     apply_email_optout_migration()
@@ -2293,6 +2308,20 @@ def apply_site_boundary_name_migration():
     if not db.session.get(SchemaMigration, SITE_BOUNDARY_NAME_SCHEMA_REVISION):
         db.session.add(SchemaMigration(revision=SITE_BOUNDARY_NAME_SCHEMA_REVISION))
     db.session.commit()  # never leave the ALTER's table lock open for later migrations
+
+
+def apply_site_image_bounds_migration():
+    """Store the site image placement with the project so every browser and client sees the same alignment."""
+    tables = set(inspect(db.engine).get_table_names())
+    if "project_site_setup" in tables:
+        columns = {column["name"] for column in inspect(db.engine).get_columns("project_site_setup")}
+        if "image_bounds_json" not in columns:
+            db.session.execute(text(
+                'ALTER TABLE "project_site_setup" ADD COLUMN "image_bounds_json" TEXT NOT NULL DEFAULT \'\''
+            ))
+    if not db.session.get(SchemaMigration, SITE_IMAGE_BOUNDS_SCHEMA_REVISION):
+        db.session.add(SchemaMigration(revision=SITE_IMAGE_BOUNDS_SCHEMA_REVISION))
+    db.session.commit()
 
 
 def apply_share_keyword_migration():
@@ -5098,26 +5127,46 @@ def upload_batch():
     videos = request.files.getlist("videos")
     directions = request.form.getlist("directions")
     titles = request.form.getlist("titles")
+    background = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+    def finish(message, ok, target=None):
+        """Site capture uploads in the background: answer with JSON so the message reaches the page."""
+        target = target or url_for("upload")
+        if background:
+            if ok:
+                flash(message, "success")
+            return jsonify({"ok": ok, "message": message, "redirect": target}), (200 if ok else 400)
+        flash(message, "success" if ok else "error")
+        return redirect(target)
+
+    if len(directions) == len(videos):
+        # Rows left without a file are skipped together with their direction and title.
+        kept = [i for i, video in enumerate(videos) if video and video.filename]
+        videos = [videos[i] for i in kept]
+        directions = [directions[i] for i in kept]
+        titles = [titles[i] for i in kept if i < len(titles)]
     if not date_value or not videos:
-        flash("Choose a date and add at least one video.", "error")
-        return redirect(url_for("upload"))
+        return finish("Choose a date and add at least one video.", False)
     if not user_can_upload_project(project):
         abort(403)
     if not project_capacity_available(project):
-        flash("The project limit for this plan has been reached.", "error")
-        return redirect(url_for("upload"))
+        return finish("The project limit for this plan has been reached.", False)
+    directions = [normalize_direction(d) for d in directions]
     if len(directions) != len(videos) or any(d not in DIRECTIONS for d in directions):
-        flash("Choose a valid direction for every selected video.", "error")
-        return redirect(url_for("upload"))
+        return finish("Choose one video per row and a valid direction for each.", False)
 
     created = 0
     failed = 0
+    skipped = []
     for index, (video, direction) in enumerate(zip(videos, directions)):
+        name = Path(video.filename or "").name[:120] if video else ""
         if not video or not video.filename or not ext_allowed(video.filename, ALLOWED_VIDEO):
             failed += 1
+            skipped.append(f"{name or 'a row'} (not a supported video type)")
             continue
         if not video_signature_valid(video.stream, video.filename):
             failed += 1
+            skipped.append(f"{name} (file content is not a valid video)")
             continue
         stored = None
         try:
@@ -5127,6 +5176,7 @@ def upload_batch():
                 delete_stored_file(filename)
                 release_storage_reservation(reservation_id)
                 failed += 1
+                skipped.append(f"{name} (already uploaded)")
                 continue
             stem = Path(original).stem
             base_id = re.sub(r"[^A-Za-z0-9_-]+", "-", stem).strip("-")[:50] or "FLIGHT"
@@ -5155,10 +5205,17 @@ def upload_batch():
                 delete_stored_file(stored[0])
                 release_storage_reservation(stored[4])
             failed += 1
-    flash(f"Batch upload complete: {created} uploaded, {failed} skipped/failed.", "success" if created else "error")
+            skipped.append(f"{name} (could not be saved, try again)")
+    skipped_text = "; ".join(skipped)
+    if created:
+        message = f"{created} video{'' if created == 1 else 's'} uploaded" + (f". Skipped: {skipped_text}." if failed else ".")
+    else:
+        message = "No videos were uploaded" + (f". Skipped: {skipped_text}" if skipped else "") + ". Use MP4, MOV, M4V, WEBM or AVI files that haven't been uploaded already."
     if request.form.get("return_to") == "uploads":
-        return redirect(f"/admin/upload?map_project={quote(project)}&map_date={date_value.isoformat()}#uploads")
-    return redirect(url_for("admin") + "#recent-flights" if current_user.is_admin else url_for("dashboard"))
+        target = f"/admin/upload?map_project={quote(project)}&map_date={date_value.isoformat()}#uploads"
+    else:
+        target = url_for("admin") + "#recent-flights" if current_user.is_admin else url_for("dashboard")
+    return finish(message, bool(created), target)
 
 
 R2_UPLOAD_PART_SIZE = 64 * 1024 * 1024
@@ -5505,6 +5562,8 @@ def upload_project_map():
             setup = ProjectSiteSetup(project=project)
             db.session.add(setup)
         setup.module = module
+        if module == "image":
+            setup.image_bounds_json = ""  # a new picture is placed afresh and saved by the editor
         complete_storage_reservation(reservation_id)
         db.session.commit()
         if old_filename:
@@ -5519,6 +5578,38 @@ def upload_project_map():
         app.logger.exception("Project map upload failed")
         flash("Map upload failed.", "error")
     return redirect(f"/admin/site-capture?map_project={quote(project)}#videos")
+
+
+def parse_image_bounds(value):
+    """[[south, west], [north, east]] with valid, non-empty extents, or None."""
+    try:
+        (south, west), (north, east) = [[float(v) for v in pair] for pair in value]
+    except (TypeError, ValueError):
+        return None
+    values = (south, west, north, east)
+    if not all(math.isfinite(v) for v in values) or not (-90 <= south < north <= 90 and -180 <= west < east <= 180):
+        return None
+    return [[south, west], [north, east]]
+
+
+@app.post("/admin/projects/site-image-bounds")
+@admin_required
+@company_feature_required("site_maps")
+def save_site_image_bounds():
+    payload = request.get_json(silent=True) or {}
+    project = clean_line(payload.get("project", ""), 160)
+    bounds = parse_image_bounds(payload.get("bounds"))
+    if not project or not bounds:
+        return jsonify({"error": "Choose a project and a valid image position."}), 400
+    setup = ProjectSiteSetup.query.filter_by(project=project).first()
+    if not setup:
+        if not project_capacity_available(project):
+            return jsonify({"error": "The project limit for this plan has been reached."}), 403
+        setup = ProjectSiteSetup(project=project, module="image")
+        db.session.add(setup)
+    setup.image_bounds_json = json.dumps(bounds)
+    db.session.commit()
+    return jsonify({"ok": True, "bounds": bounds})
 
 
 @app.post("/admin/projects/site-setup")
@@ -5633,6 +5724,9 @@ def save_project_flight_path():
         if not (math.isfinite(center_lat) and -90 <= center_lat <= 90 and math.isfinite(center_lng) and -180 <= center_lng <= 180):
             raise ValueError
         setup = ProjectSiteSetup.query.filter_by(project=project).first()
+        if setup and setup.locked:
+            # The admin locked the site view in Site setup; saving a route must not move it.
+            raise ValueError
         if not setup:
             setup = ProjectSiteSetup(project=project)
             db.session.add(setup)

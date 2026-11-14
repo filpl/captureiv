@@ -12,7 +12,7 @@
   let imageBounds=null,imageOverlay=null;const imagePinMarkers=[];
   if(module==='image'){
     map.getPane('basemapPane').style.visibility='hidden';
-    if(root.dataset.imageUrl){imageBounds=map.getBounds();imageOverlay=L.imageOverlay(root.dataset.imageUrl,imageBounds,{pane:'referencePane'}).addTo(map)}else $('#viewer-map-empty').hidden=false;
+    if(root.dataset.imageUrl){let saved=null;try{saved=JSON.parse(root.dataset.imageBounds||'null')}catch{}imageBounds=saved?L.latLngBounds(saved):map.getBounds();if(saved)map.fitBounds(imageBounds);imageOverlay=L.imageOverlay(root.dataset.imageUrl,imageBounds,{pane:'referencePane'}).addTo(map)}else $('#viewer-map-empty').hidden=false;
   }
   const paths=JSON.parse($('#viewer-flight-paths')?.textContent||'[]'),colors=['#e17749','#397d59','#4c83c8','#8b66a5'];
   const pathsByDate=JSON.parse($('#viewer-flight-paths-by-date')?.textContent||'{}');
@@ -64,9 +64,11 @@
   let orthoBounds=null;
   if(module==='ortho'&&root.dataset.orthoUrl){map.getPane('basemapPane').style.visibility='hidden';fetch(root.dataset.orthoUrl).then(r=>{if(!r.ok)throw Error('Orthomosaic unavailable');return r.arrayBuffer()}).then(bytes=>window.parseGeoraster(bytes)).then(georaster=>{const raster=new window.GeoRasterLayer({georaster,resolution:256,pane:'referencePane'}).addTo(map);const b=raster.getBounds();if(b?.isValid()){orthoBounds=b;map.fitBounds(b,{padding:[24,24],maxZoom:20})}}).catch(()=>{$('#viewer-map-empty').textContent='This orthomosaic could not be loaded.';$('#viewer-map-empty').hidden=false})}
   if(module==='ortho'&&!root.dataset.orthoUrl){map.getPane('basemapPane').style.visibility='hidden';$('#viewer-map-empty').hidden=false}
+  const hasSavedImageBounds=(()=>{try{return Boolean(JSON.parse(root.dataset.imageBounds||'null'))}catch{return false}})();
   const fitSiteImage=()=>{
     map.invalidateSize({pan:false});
-    if(module==='image'&&imageOverlay){
+    // Admin-aligned image: keep its saved position so routes stay on the right spot.
+    if(module==='image'&&imageOverlay&&!hasSavedImageBounds){
       const image=imageOverlay.getElement(),size=map.getSize();
       if(image?.naturalWidth&&image?.naturalHeight&&size.x&&size.y){
         // Keep the source photo's proportions and cover the map viewport. A
@@ -92,6 +94,7 @@
     button.innerHTML='<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4M3 7l5-5M17 7l-5-5M17 13l-5 5M3 13l5 5"/></svg>';
     L.DomEvent.disableClickPropagation(button);
     L.DomEvent.on(button,'click',()=>{
+      if(module==='image'&&hasSavedImageBounds&&imageBounds){map.fitBounds(imageBounds,{animate:true});return}
       if(module==='ortho'&&orthoBounds){map.fitBounds(orthoBounds,{padding:[24,24],maxZoom:20,animate:true});return}
       const alreadyAtStart=map.getCenter().equals(initialCenter)&&map.getZoom()===initialZoom;
       if(module==='image'&&!alreadyAtStart)map.once('moveend',fitSiteImage);
