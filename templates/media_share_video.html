@@ -1,0 +1,12 @@
+{% extends '_media_share_base.html' %}
+{% block title %}{{ video.title }}{% endblock %}
+{% block body %}
+<main class="ms-main">
+  <p class="ms-eyebrow">SHARED VIDEO · {{ video.project }}</p>
+  <h1>{{ video.title }}</h1>
+  <p class="ms-sub">Uploaded {{ video.uploaded_at.strftime('%b %d, %Y') }} · {{ (video.file_size / 1048576)|round(1) }} MB</p>
+  {% if video.tag_list %}<div class="ms-tags">{% for t in video.tag_list %}<span class="ms-tag">{{ t }}</span>{% endfor %}</div>{% endif %}
+  <div class="ms-player">{% if embed %}<div class="ms-frame"><iframe src="{{ embed }}" title="{{ video.title }}" allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="eager"></iframe></div>{% else %}<video controls playsinline preload="metadata" src="{{ src }}"></video>{% endif %}</div>
+  <div class="ms-actions"><a class="ms-btn" href="{{ download }}" download><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg> Download original</a><p class="ms-note">{{ 'Streaming in the best quality for your device and connection.' if embed else 'Playing the original, full-quality file.' }} The download is the original file.</p></div>
+</main>
+{% endblock %}

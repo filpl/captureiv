@@ -1,0 +1,11 @@
+{% extends '_media_share_base.html' %}
+{% block title %}{{ 'Link unavailable' if code == 404 else 'Something went wrong' }}{% endblock %}
+{% block body %}
+<main class="ms-gate">
+  <section class="ms-card">
+    <p class="ms-eyebrow">{{ 'LINK UNAVAILABLE' if code in (404, 410) else ('PLEASE WAIT' if code == 429 else 'SHARED MEDIA') }}</p>
+    <h1>{{ 'This link isn’t available' if code in (404, 410) else ('Too many attempts' if code == 429 else 'We couldn’t open this') }}</h1>
+    <p class="ms-sub">{{ message }} If you think this is a mistake, ask the person who shared it for a new link.</p>
+  </section>
+</main>
+{% endblock %}

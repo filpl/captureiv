@@ -119,6 +119,10 @@ class R2Storage:
         finally:
             body.close()
 
+    def download_file(self, key: str, path: Path) -> None:
+        """Copy an object to a local file (used to convert uploaded laser scans)."""
+        self.client.download_file(self.bucket, key, str(path))
+
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=key)
 

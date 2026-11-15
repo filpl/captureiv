@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+{% block title %}Media library{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='media-library.css') }}?v=2">{% endblock %}
+{% macro share_fields(id_prefix) %}
+  <fieldset class="ml-mode">
+    <legend>Who can watch</legend>
+    <label><input type="radio" name="mode" value="open" checked data-mode-toggle="{{ id_prefix }}"> <span><strong>Anyone with the link</strong><small>Opens straight away, no keyword.</small></span></label>
+    <label><input type="radio" name="mode" value="keyword" data-mode-toggle="{{ id_prefix }}"> <span><strong>Keyword required</strong><small>Visitors type a keyword first.</small></span></label>
+  </fieldset>
+  <label class="ml-keyword" id="{{ id_prefix }}-keyword" hidden><span>Keyword</span><input name="keyword" maxlength="80" autocomplete="off" placeholder="e.g. HarborWeek12" pattern="[A-Za-z0-9][A-Za-z0-9 _\-]{3,79}" title="4–80 letters, numbers, spaces, dashes or underscores"></label>
+  <label><span>Expires on <span class="muted">(optional)</span></span><input type="date" name="expires_on" data-local-min></label>
+  <input type="hidden" name="tz_offset" value="0" data-tz-offset>
+{% endmacro %}
+{% block content %}
+<div class="ml-page">
+<div class="page-heading"><div><p class="eyebrow">MEDIA LIBRARY</p><h1>Media</h1><p class="muted">Upload videos, label and tag them, and share a single video or the whole library by link. Everything can be downloaded in its original quality.</p></div>
+  {% if sharing_enabled %}<a class="button secondary" href="#share-library">Share library</a>{% endif %}</div>
+
+{% if created %}
+<section class="panel ml-created" role="status">
+  <p class="eyebrow">LINK READY</p>
+  <h2>{{ 'Library link' if created.kind == 'library' else '“' ~ titles.get(created.video_id, 'Video') ~ '”' }}</h2>
+  <div class="ml-copy"><input readonly id="created-url" value="{{ share_url(created) }}" aria-label="Share link"><button type="button" class="button primary small" data-copy="created-url">Copy link</button></div>
+  <p class="muted">{{ 'Visitors must enter the keyword you set.' if created.mode == 'keyword' else 'Anyone with this link can watch and download.' }}{% if created.expires_at %} Expires {{ created.expires_at.strftime('%b %d, %Y') }}.{% endif %}</p>
+</section>
+{% endif %}
+
+<details class="panel ml-upload" {% if not total_videos %}open{% endif %}>
+  <summary>＋ Upload a video</summary>
+  {% if uploadable or admin %}
+  <form method="post" action="{{ url_for('media_library.upload') }}" enctype="multipart/form-data" id="ml-upload-form"
+        data-r2="{{ '1' if r2_multipart else '' }}" data-max-bytes="{{ max_bytes }}" data-csrf="{{ csrf_token() }}"
+        data-r2-base="/media/r2-upload" data-done="{{ url_for('media_library.index') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label class="ml-drop"><span>Video file</span><input type="file" name="file" accept="video/mp4,video/quicktime,video/x-m4v,video/webm,.mp4,.mov,.m4v,.webm" required><small>MP4, MOV, M4V or WEBM · up to {{ (max_bytes / 1073741824)|round|int }} GB{% if r2_multipart %} · large uploads resume if your connection drops{% endif %}</small></label>
+    <div class="ml-grid2">
+      <label><span>Title</span><input name="title" maxlength="200" placeholder="e.g. Level 3 slab pour"></label>
+      <label><span>Project</span><select name="project" {% if not admin %}required{% endif %}>{% if admin %}<option value="">Choose a project…</option>{% endif %}{% for p in uploadable %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
+    </div>
+    {% if admin %}<label><span>Or start a new project <span class="muted">(admins only)</span></span><input name="new_project" maxlength="160" placeholder="New project name"></label>{% endif %}
+    <label><span>Tags <span class="muted">(separate with commas)</span></span><input name="tags" list="ml-tag-options" maxlength="600" placeholder="e.g. Roof, Week 12, Concrete"></label>
+    <datalist id="ml-tag-options">{% for t in all_tags %}<option value="{{ t }}">{% endfor %}</datalist>
+    <div class="ml-progress" hidden><span></span><b>0%</b></div>
+    <p class="ml-upload-error flash error" hidden></p>
+    <div class="button-row"><button class="button primary">Upload video</button></div>
+  </form>
+  {% else %}<p class="muted">You aren't assigned to a project yet. Ask a company admin to add you to one.</p>{% endif %}
+</details>
+
+<section class="ml-library">
+  <div class="section-title"><h2>Videos <span class="count">{{ videos|length }}</span></h2></div>
+  {% if total_videos %}
+  <form class="filter-bar ml-filter" method="get">
+    <label><span>Tag</span><select name="tag"><option value="">All tags</option>{% for t in all_tags %}<option value="{{ t }}" {% if t == tag %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+    <label><span>Project</span><select name="project"><option value="">All projects</option>{% for p in projects %}<option value="{{ p }}" {% if p == project %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></label>
+    <label><span>Search</span><input name="q" value="{{ search }}" placeholder="Video title…"></label>
+    <button class="button secondary">Apply</button>{% if tag or project or search %}<a class="quiet" href="{{ url_for('media_library.index') }}">Clear</a>{% endif %}
+  </form>
+  {% if all_tags %}<div class="ml-chips">{% for t in all_tags %}<a class="ml-chip{% if t == tag %} is-active{% endif %}" href="{{ url_for('media_library.index', tag=t) }}">{{ t }}</a>{% endfor %}</div>{% endif %}
+  {% endif %}
+  {% if videos %}
+  <div class="ml-cards">
+    {% for v in videos %}
+    <article class="ml-card" id="video-{{ v.id }}">
+      <video controls preload="metadata" playsinline src="{{ url_for('media_library.team_file', video_id=v.id) }}#t=0.5"></video>
+      <div class="ml-card-body">
+        <h3>{{ v.title }}</h3>
+        <p class="muted">{{ v.project }} · {{ v.uploaded_at.strftime('%b %d, %Y') }} · {{ (v.file_size / 1048576)|round(1) }} MB{% if creators.get(v.uploaded_by) %} · {{ creators.get(v.uploaded_by) }}{% endif %}</p>
+        {% if stream_on %}<p class="ml-stream {{ v.stream_status or 'none' }}">{% if v.stream_status == 'ready' %}✓ Plays on every device{% elif v.stream_status == 'processing' %}Optimizing for every device…{% elif v.stream_status == 'error' %}Original file only (optimization failed){% else %}Original file{% endif %}</p>{% endif %}
+        {% if v.tag_list %}<div class="ml-chips small">{% for t in v.tag_list %}<a class="ml-chip" href="{{ url_for('media_library.index', tag=t) }}">{{ t }}</a>{% endfor %}</div>{% endif %}
+        <div class="ml-actions">
+          {% if sharing_enabled %}
+          <details class="ml-pop"><summary class="button primary small">Share</summary>
+            <form method="post" action="{{ url_for('media_library.create_share') }}" class="ml-share-form">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="kind" value="video"><input type="hidden" name="video_id" value="{{ v.id }}">
+              {{ share_fields('v' ~ v.id) }}
+              <button class="button primary small">Create link</button>
+            </form>
+          </details>
+          {% endif %}
+          <a class="button secondary small" href="{{ url_for('media_library.team_download', video_id=v.id) }}" download>Download</a>
+          {% if can_manage(v) %}
+          <details class="ml-pop"><summary class="button secondary small">Edit</summary>
+            <form method="post" action="{{ url_for('media_library.edit', video_id=v.id) }}" class="ml-share-form">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <label><span>Title</span><input name="title" maxlength="200" value="{{ v.title }}" required></label>
+              <label><span>Tags</span><input name="tags" list="ml-tag-options" maxlength="600" value="{{ v.tag_list|join(', ') }}"></label>
+              <button class="button primary small">Save</button>
+            </form>
+          </details>
+          <form method="post" action="{{ url_for('media_library.delete', video_id=v.id) }}" data-confirm="Delete this video and turn off its share links?"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet ml-delete">Delete</button></form>
+          {% endif %}
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% elif total_videos %}<p class="muted">No videos match these filters.</p>
+  {% else %}<div class="empty-state"><p>No videos yet. Upload one above to start the library.</p></div>{% endif %}
+</section>
+
+{% if sharing_enabled %}
+<section class="panel ml-library-share" id="share-library">
+  <div class="section-title"><h2>Share the whole library</h2></div>
+  <p class="muted">One link to every video{% if not admin %} in the projects you're assigned to{% endif %}, with tag filters and downloads.{% if map_available %} You can also include one project's flight map.{% endif %}</p>
+  <form method="post" action="{{ url_for('media_library.create_share') }}" class="ml-share-form wide">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="kind" value="library">
+    {{ share_fields('lib') }}
+    {% if map_available and projects %}
+    <label class="ml-check"><input type="checkbox" name="show_map" value="1" id="lib-show-map"> Include a flight map</label>
+    <label id="lib-map-project" hidden><span>Flight map project</span><select name="map_project">{% for p in projects %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
+    {% endif %}
+    <button class="button primary">Create library link</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="panel ml-links" id="share-links">
+  <div class="section-title"><h2>Share links <span class="count">{{ shares|length }}</span></h2></div>
+  {% if shares %}
+  <div class="ml-table" role="table">
+    <div class="ml-row ml-head" role="row"><span>Link</span><span>Access</span><span>Expires</span><span>Views</span><span>Status</span><span></span></div>
+    {% for s in shares %}{% set active = share_active(s) %}
+    <div class="ml-row{% if not active %} is-off{% endif %}" role="row">
+      <span><strong>{% if s.kind == 'library' %}Whole library{% elif s.video_id in titles %}{{ titles[s.video_id] }}{% if s.video_id not in visible_ids %} <em class="muted">(not in your projects)</em>{% endif %}{% else %}Deleted video{% endif %}</strong><small>{{ creators.get(s.created_by, '') }} · {{ s.created_at.strftime('%b %d, %Y') }}{% if s.kind == 'library' and s.show_map %} · map: {{ s.map_project }}{% endif %}</small></span>
+      <span>{{ 'Keyword' if s.mode == 'keyword' else 'Anyone with link' }}</span>
+      <span>{{ s.expires_at.strftime('%b %d, %Y') if s.expires_at else 'Never' }}</span>
+      <span>{{ s.view_count }}</span>
+      <span class="ml-status {{ 'on' if active else 'off' }}">{{ 'Active' if active else ('Revoked' if s.revoked_at else 'Expired') }}</span>
+      <span class="ml-row-actions">{% if active %}<input readonly id="link-{{ s.id }}" value="{{ share_url(s) }}" class="sr-only" aria-hidden="true" tabindex="-1"><button type="button" class="button secondary small" data-copy="link-{{ s.id }}">Copy link</button>
+        <form method="post" action="{{ url_for('media_library.revoke_share', share_id=s.id) }}" data-confirm="Turn off this link? Anyone using it will lose access."><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="quiet ml-delete">Revoke</button></form>{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="muted">No links yet. Use Share on a video, or share the whole library.</p>{% endif %}
+</section>
+</div>
+{% if r2_multipart %}<script src="{{ url_for('static', filename='r2-upload.js') }}?v=2"></script>{% endif %}
+<script src="{{ url_for('static', filename='media-library.js') }}?v=1"></script>
+{% endblock %}

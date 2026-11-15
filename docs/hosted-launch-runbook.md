@@ -35,6 +35,43 @@ platform's HTTPS origin and browser `PUT` requests. Do not make the bucket
 public. Configure managed database backups and an independent backup/copy policy
 for media objects before accepting customer uploads.
 
+## 2b. Media library: viewer domain and Cloudflare Stream
+
+Public media links are served from their own host so viewers never share cookies,
+pages or sessions with the platform.
+
+1. DNS: add `view.captureiv.com` as a CNAME to the Render service (not proxied while
+   Render issues the certificate), then add it as a custom domain on that service.
+2. Set `VIEWER_BASE_URL=https://view.captureiv.com` on the Render service. Links are
+   then generated on the viewer host; the platform host redirects old share URLs there,
+   and the viewer host answers nothing but share pages (everything else is 404).
+3. R2 bucket CORS: allow `GET` and `HEAD` from `https://view.captureiv.com` (in addition
+   to the platform origin) so shared orthomosaic maps can be fetched by the viewer.
+4. Cloudflare Stream (plays every upload on any device): enable Stream on the account,
+   create an API token with *Account → Stream → Edit*, and set
+   `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_STREAM_API_TOKEN` on Render. Without them,
+   links play the original file (MP4/H.264 plays everywhere; iPhone HEVC may not play
+   in some Windows/Android browsers but can always be downloaded).
+5. Large uploads go straight to R2 in resumable parts (up to `MAX_CONTENT_LENGTH`,
+   8 GB by default) whenever `STORAGE_BACKEND=r2`.
+
+## 2c. Laser scans on the project map
+
+Admins upload LAS, LAZ or E57 scans per project and flight date on **Site capture**. Each upload is
+converted in the background (one at a time per machine, in a separate process) into a georeferenced
+map overlay that sits under that date's flight paths, a streamed 3D copy, and a thumbnail. Clients see
+the scan on their Flight Scans map, when comparing dates, and in the 3D view.
+
+- Memory: a 10M-point LAZ peaks at about 300 MB in the converter. Use an instance with at least 2 GB
+  (Render Standard). `SCAN_CONVERT_MEMORY_MB` (default 1400) caps the converter's address space so an
+  oversized or malformed file fails its conversion instead of the instance; lower it on smaller plans.
+- `SCAN_MAX_POINTS` (default 2,000,000) sets how many points the 3D copy keeps. The original file is
+  always kept for download.
+- Map placement needs a coordinate system in the file (standard for survey LAS/LAZ). Scans without
+  one, and E57 files, open in 3D only. E57 setups over 5 million points are refused; export LAZ.
+- R2 CORS: the 3D viewer reads the converted file from R2 through a signed redirect, so the platform
+  origin needs `GET` in the bucket's CORS rules (already covered by the upload rule above).
+
 ## 3. Configure Stripe in test mode first
 
 Use a Stripe test account/key and a test webhook endpoint before enabling live

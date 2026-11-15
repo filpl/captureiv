@@ -1,0 +1,14 @@
+/* Full-page 3D scan view (team and client). */
+body.s3d{margin:0;min-height:100vh;background:#f5f7fb;color:#0c1830;font-family:Inter,"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif}
+.s3d-bar{display:flex;align-items:center;gap:16px;padding:12px 20px;background:#fff;border-bottom:1px solid #e3e8f1}
+.s3d-back,.s3d-btn{flex:0 0 auto;padding:8px 12px;border-radius:9px;border:1px solid #d7deea;background:#fff;color:#0c1830;font-size:.85rem;font-weight:600;text-decoration:none}
+.s3d-back:hover,.s3d-btn:hover{border-color:#2f5fd0;color:#2f5fd0}
+.s3d-btn{background:#2f5fd0;border-color:#2f5fd0;color:#fff}
+.s3d-btn:hover{background:#2449ad;color:#fff}
+.s3d-title{flex:1;min-width:0}
+.s3d-title small{display:block;color:#5b6b82;font-size:.78rem;font-weight:600}
+.s3d-title h1{margin:2px 0 0;font-size:1.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s3d-main{padding:16px 20px 24px}
+.s3d-viewer.sv{height:calc(100vh - 150px);min-height:420px}
+.s3d-note{margin:10px 2px 0;color:#5b6b82;font-size:.84rem}
+@media (max-width:640px){.s3d-bar{flex-wrap:wrap;padding:10px 16px}.s3d-title{order:-1;flex-basis:100%}.s3d-main{padding:12px 16px}.s3d-viewer.sv{height:calc(100vh - 190px)}}
