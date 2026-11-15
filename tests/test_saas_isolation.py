@@ -1412,6 +1412,65 @@ class TenantIsolationTests(unittest.TestCase):
         with patch.dict(os.environ, {"ANNUAL_BILLING_ENABLED": "1"}):
             self.assertIn(b'value="annual"', client.get("/register?plan=basic").data)
 
+    def test_signup_code_verifies_on_the_same_screen_and_goes_to_checkout(self):
+        client = portal.app.test_client()
+        page = client.get("/register?plan=basic")
+        csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
+        with portal.app.app_context():
+            plan_id = portal.SubscriptionPlan.query.filter_by(name="Basic").first().id
+        data = {"_csrf": csrf, "company_name": "Code Co", "email": "code@example.test",
+                "password": "test-password-123", "confirm_password": "test-password-123",
+                "plan_id": str(plan_id), "billing_interval": "monthly", "accept_policies": "yes"}
+        with patch.object(portal, "send_account_email", return_value=True) as send_mail:
+            response = client.post("/register", data=data)
+        self.assertEqual(response.status_code, 201)
+        self.assertIn(b'name="code"', response.data)
+        body = send_mail.call_args.args[2]
+        code = re.search(r"code is: (\d{6})", body).group(1)
+        self.assertIn("/verify-email/", body)
+        wrong = "000000" if code != "000000" else "111111"
+        bad = client.post("/verify-code", data={"_csrf": csrf, "code": wrong, "email": "code@example.test"})
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn(b"incorrect", bad.data)
+        ok = client.post("/verify-code", data={"_csrf": csrf, "code": code, "email": "code@example.test"})
+        self.assertEqual(ok.status_code, 302)
+        self.assertIn("/account/checkout/", ok.headers["Location"])
+        with portal.app.app_context():
+            user = portal.User.query.filter_by(email="code@example.test").one()
+            self.assertTrue(user.email_verified)
+            self.assertFalse(user.active)
+            membership = portal.CompanyMembership.query.filter_by(user_id=user.id).one()
+            self.assertEqual(membership.status, "verified_pending_billing")
+        # The code works once; another browser without the sign-up session can't use it.
+        other = portal.app.test_client()
+        with other.session_transaction() as state:
+            state["_csrf"] = "t"
+        self.assertEqual(other.post("/verify-code", data={"_csrf": "t", "code": code}).status_code, 400)
+
+    def test_signup_code_locks_after_five_wrong_tries(self):
+        client = portal.app.test_client()
+        page = client.get("/register?plan=basic")
+        csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
+        with portal.app.app_context():
+            plan_id = portal.SubscriptionPlan.query.filter_by(name="Basic").first().id
+        data = {"_csrf": csrf, "company_name": "Lock Co", "email": "lock@example.test",
+                "password": "test-password-123", "confirm_password": "test-password-123",
+                "plan_id": str(plan_id), "billing_interval": "monthly", "accept_policies": "yes"}
+        with patch.object(portal, "send_account_email", return_value=True) as send_mail:
+            client.post("/register", data=data)
+        code = re.search(r"code is: (\d{6})", send_mail.call_args.args[2]).group(1)
+        wrong = "000000" if code != "000000" else "111111"
+        for _ in range(5):
+            client.post("/verify-code", data={"_csrf": csrf, "code": wrong})
+        late = client.post("/verify-code", data={"_csrf": csrf, "code": code})
+        self.assertEqual(late.status_code, 400)
+        with patch.object(portal, "send_account_email", return_value=True) as send_mail:
+            client.post("/verify-code/resend", data={"_csrf": csrf})
+        fresh = re.search(r"code is: (\d{6})", send_mail.call_args.args[2]).group(1)
+        with portal.app.app_context():
+            portal.RateLimitEvent.query.filter_by(route="verify-code-user").delete(); portal.db.session.commit()
+        self.assertEqual(client.post("/verify-code", data={"_csrf": csrf, "code": fresh}).status_code, 302)
+
     def test_registration_remains_pending_without_stripe_confirmation(self):
         client = portal.app.test_client()
         page = client.get("/register?plan=basic")
