@@ -1288,6 +1288,8 @@ def rate_limit_sensitive_routes():
              "/register": ("registration", 8, timedelta(hours=1)),
              "/forgot-password": ("recovery", 8, timedelta(hours=1)),
              "/resend-verification": ("verification", 8, timedelta(hours=1)),
+             "/verify-code": ("verify-code", 12, timedelta(minutes=15)),
+             "/verify-code/resend": ("verification", 8, timedelta(hours=1)),
              "/": ("viewer-code-open", 12, timedelta(minutes=10))}.get(request.path)
     if route is None and request.path.startswith("/share/"):
         route = ("viewer-code", 20, timedelta(minutes=10))
@@ -3035,6 +3037,108 @@ def send_account_email(recipient, subject, body):
     return True
 
 
+VERIFY_CODE_MINUTES = 30
+VERIFY_CODE_MAX_FAILURES = 5
+
+
+def verify_code_hash(user_id, code):
+    """Keyed hash of a 6-digit sign-up code, scoped to one user."""
+    return hashlib.sha256(f"{app.config['SECRET_KEY']}:verify-code:{user_id}:{code}".encode()).hexdigest()
+
+
+def issue_email_verification(user):
+    """Replace any open verification link/code for this user. Returns (link, code)."""
+    EmailActionToken.query.filter_by(user_id=user.id, purpose="verify_email", used_at=None).update(
+        {"used_at": now_utc()}, synchronize_session=False)
+    # Old codes are removed (not just closed) so a repeated code can never clash with the unique hash.
+    EmailActionToken.query.filter_by(user_id=user.id, purpose="verify_code").delete(synchronize_session=False)
+    raw_token = secrets.token_urlsafe(32)
+    code = f"{secrets.randbelow(10 ** 6):06d}"
+    db.session.add_all([
+        EmailActionToken(user_id=user.id, token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+                         purpose="verify_email", expires_at=now_utc() + timedelta(hours=24)),
+        EmailActionToken(user_id=user.id, token_hash=verify_code_hash(user.id, code),
+                         purpose="verify_code", expires_at=now_utc() + timedelta(minutes=VERIFY_CODE_MINUTES)),
+    ])
+    return absolute_app_url("verify_email", token=raw_token), code
+
+
+def verification_email_body(display_name, code, verify_url):
+    return (f"Hello {display_name},\n\nYour Capture IV verification code is: {code}\n\n"
+            f"Enter it on the sign-up page within {VERIFY_CODE_MINUTES} minutes to continue to checkout.\n\n"
+            f"Or open this link within 24 hours: {verify_url}\n\n"
+            "Your account will remain pending until subscription billing is confirmed.")
+
+
+def complete_email_verification(user):
+    """Mark the email verified and return the checkout redirect for the pending subscription."""
+    user.email_verified = True
+    EmailActionToken.query.filter(EmailActionToken.user_id == user.id, EmailActionToken.used_at.is_(None),
+                                  EmailActionToken.purpose.in_(["verify_email", "verify_code"])).update(
+        {"used_at": now_utc()}, synchronize_session=False)
+    membership = CompanyMembership.query.filter_by(user_id=user.id).first()
+    if membership:
+        membership.status = "verified_pending_billing"
+    db.session.commit()
+    pending_subscription = (CompanySubscription.query.filter_by(company_id=membership.company_id)
+                            .order_by(CompanySubscription.id.desc()).first() if membership else None)
+    session["pending_checkout_subscription_id"] = pending_subscription.id if pending_subscription else None
+    session.pop("verify_user_id", None)
+    flash("Email verified. Continue to secure checkout; access starts only after billing confirmation.", "success")
+    return (redirect(url_for("subscription_checkout", subscription_id=session["pending_checkout_subscription_id"]))
+            if session["pending_checkout_subscription_id"] else redirect(url_for("login")))
+
+
+@app.post("/verify-code")
+def verify_code():
+    """Sign-up continues on the same screen: the 6-digit code from the email verifies it."""
+    email = request.form.get("email", "").strip().lower()[:254]
+    code = re.sub(r"\D", "", request.form.get("code", ""))[:6]
+    user = db.session.get(User, session.get("verify_user_id") or 0)
+    if user and not user.email_verified:
+        failures_key = hashlib.sha256(f"{app.config['SECRET_KEY']}:verify-code-user:{user.id}".encode()).hexdigest()
+        cutoff = now_utc() - timedelta(minutes=VERIFY_CODE_MINUTES)
+        failures = RateLimitEvent.query.filter_by(route="verify-code-user", subject_hash=failures_key).filter(
+            RateLimitEvent.created_at >= cutoff).count()
+        action = (EmailActionToken.query.filter_by(user_id=user.id, purpose="verify_code", used_at=None)
+                  .order_by(EmailActionToken.id.desc()).first())
+        if (failures < VERIFY_CODE_MAX_FAILURES and action and action.expires_at >= now_utc() and len(code) == 6
+                and secrets.compare_digest(action.token_hash, verify_code_hash(user.id, code))):
+            return complete_email_verification(user)
+        db.session.add(RateLimitEvent(route="verify-code-user", subject_hash=failures_key))
+        if failures + 1 >= VERIFY_CODE_MAX_FAILURES and action:
+            action.used_at = now_utc()
+            message = "Too many incorrect codes. Send a new code and try again."
+        elif action and action.expires_at < now_utc():
+            message = "That code has expired. Send a new code and try again."
+        else:
+            message = "That code is incorrect. Check the latest email and try again."
+        db.session.commit()
+    else:
+        message = "That code is incorrect. Check the latest email and try again."
+    flash(message, "error")
+    return render_template("registration_pending.html", email=email or (user.email if user else ""),
+                           plan=None, local_verify_url="", email_sent=True), 400
+
+
+@app.post("/verify-code/resend")
+def resend_verify_code():
+    user = db.session.get(User, session.get("verify_user_id") or 0)
+    email = request.form.get("email", "").strip().lower()[:254]
+    if user and not user.email_verified and user.email:
+        verify_url, code = issue_email_verification(user)
+        db.session.commit()
+        try:
+            send_account_email(user.email, "Your Capture IV verification code",
+                               verification_email_body(user.name or user.email, code, verify_url))
+        except Exception:
+            app.logger.exception("Verification code resend failed")
+        email = user.email
+    flash("A new code has been sent. It replaces the previous code.", "success")
+    return render_template("registration_pending.html", email=email, plan=None,
+                           local_verify_url="", email_sent=True)
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     plans = SubscriptionPlan.query.filter_by(active=True, custom_pricing=False).order_by(SubscriptionPlan.id).all()
@@ -3079,6 +3183,7 @@ def register():
                         "If this wasn't you, you can ignore this message; no new account was created.")
                 except Exception:
                     app.logger.exception("Duplicate-registration notice delivery failed")
+                session.pop("verify_user_id", None)
                 return render_template("registration_pending.html", email=email, plan=plan,
                                        local_verify_url="", email_sent=True), 201
             # Registration starts pending. Email verification alone never grants paid access.
@@ -3105,25 +3210,23 @@ def register():
                             "If this wasn't you, you can ignore this message; no new account was created.")
                     except Exception:
                         app.logger.exception("Duplicate-registration notice delivery failed")
+                session.pop("verify_user_id", None)
                 return render_template("registration_pending.html", email=email, plan=plan,
                                        local_verify_url="", email_sent=True), 201
             membership = CompanyMembership(company_id=company.id, user_id=user.id, role="company_admin", status="pending")
             subscription = CompanySubscription(company_id=company.id, plan_id=plan.id, status="pending", billing_interval=request.form.get("billing_interval", "monthly"))
             db.session.add_all([membership, subscription])
-            raw_token = secrets.token_urlsafe(32)
-            token = EmailActionToken(user_id=user.id, token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
-                                     purpose="verify_email", expires_at=now_utc() + timedelta(hours=24))
-            db.session.add(token)
+            verify_url, verify_code_value = issue_email_verification(user)
             db.session.add(AuditLog(user_id=user.id, action="account_terms_accepted",
                 resource_type="company_registration", resource_id=str(company.id),
                 detail=json.dumps({"terms_version": ACCOUNT_TERMS_VERSION,
                                    "privacy_notice_version": PRIVACY_NOTICE_VERSION,
                                    "accepted_at": now_utc().isoformat()})))
             db.session.commit()
-            verify_url = absolute_app_url("verify_email", token=raw_token)
+            session["verify_user_id"] = user.id
             try:
-                delivered = send_account_email(email, "Verify your Capture IV account",
-                    f"Hello {display_name},\n\nVerify your email within 24 hours: {verify_url}\n\nYour account will remain pending until subscription billing is confirmed.")
+                delivered = send_account_email(email, "Your Capture IV verification code",
+                    verification_email_body(display_name, verify_code_value, verify_url))
             except Exception:
                 app.logger.exception("Account verification email delivery failed")
                 delivered = False
@@ -3145,17 +3248,7 @@ def verify_email(token):
     user = db.session.get(User, action.user_id)
     if not user:
         abort(404)
-    user.email_verified = True
-    action.used_at = now_utc()
-    membership = CompanyMembership.query.filter_by(user_id=user.id).first()
-    if membership:
-        membership.status = "verified_pending_billing"
-    db.session.commit()
-    pending_subscription = (CompanySubscription.query.filter_by(company_id=membership.company_id)
-                            .order_by(CompanySubscription.id.desc()).first() if membership else None)
-    session["pending_checkout_subscription_id"] = pending_subscription.id if pending_subscription else None
-    flash("Email verified. Continue to secure checkout; access starts only after billing confirmation.", "success")
-    return redirect(url_for("subscription_checkout", subscription_id=session["pending_checkout_subscription_id"])) if session["pending_checkout_subscription_id"] else redirect(url_for("login"))
+    return complete_email_verification(user)
 
 
 @app.route("/resend-verification", methods=["GET", "POST"])
