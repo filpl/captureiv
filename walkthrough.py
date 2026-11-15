@@ -123,10 +123,10 @@ def create_walkthrough_blueprint(core):
         return membership
 
     def unlocked_share(token, *, required=True):
-        """A client share link that is unlocked in this browser and allows media."""
+        """A client share link that is unlocked in this browser and shows the Site walkthrough tab."""
         g.allow_public_viewer_scope = True
         access = core.ProjectAccess.query.filter_by(share_token=token).first() if token else None
-        if (not core.viewer_access_active(access) or not access.allow_media
+        if (not core.viewer_access_active(access) or not access.allow_walkthrough
                 or not core.company_service_enabled("walkthrough", access.company_id)):
             abort(404)
         company = db.session.get(core.Company, access.company_id)

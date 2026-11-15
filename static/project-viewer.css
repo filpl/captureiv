@@ -105,7 +105,7 @@
 @media(prefers-reduced-motion:reduce){.leaflet-popup,.flight-detail:not([hidden]),.flight-detail-card{animation-duration:.01ms!important;animation-iteration-count:1!important}}
 .viewer-topnav{background:#252b34;border-bottom:1px solid #3b434f;color:#f4f6f8}
 .viewer-topnav-label{color:#f4f6f8}
-.viewer-topnav-label span{color:#b7c4d4}
+.viewer-topnav-label span{color:#b7c4d4;max-width:26ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle}
 .viewer-topnav-project{color:#fff}
 .viewer-topnav-tabs a{color:#c4ccd6}
 .viewer-topnav-tabs a:hover,.viewer-topnav-tabs a.active{color:#fff}
@@ -585,7 +585,7 @@ body.viewer-page{height:100vh;height:100dvh;min-height:0;overflow:hidden;backgro
 /* Keep the viewer header a rich charcoal above the blue active-tab accent. */
 .viewer-topnav{background:#252b34;border-bottom:1px solid #3b434f;color:#f4f6f8}
 .viewer-topnav-label{color:#f4f6f8}
-.viewer-topnav-label span{color:#b7c4d4}
+.viewer-topnav-label span{color:#b7c4d4;max-width:26ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle}
 .viewer-topnav-project{color:#fff}
 .viewer-topnav-tabs a{color:#c4ccd6}
 .viewer-topnav-tabs a:hover,.viewer-topnav-tabs a.active{color:#fff}

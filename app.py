@@ -256,6 +256,7 @@ SHARE_LINK_CODE_SCHEMA_REVISION = "0024_share_link_code_mode"
 MEDIA_LIBRARY_SCHEMA_REVISION = "0025_media_library"
 PROJECT_SCAN_SCHEMA_REVISION = "0026_project_scans"
 SITE_IMAGE_BOUNDS_SCHEMA_REVISION = "0027_site_image_bounds"
+SHARE_TABS_SCHEMA_REVISION = "0028_share_tab_choices"
 BASIC_MONTHLY_PRICE_CENTS = 39900
 BASIC_ANNUAL_PRICE_CENTS = BASIC_MONTHLY_PRICE_CENTS * 12  # $4,788: twelve months at $399, no discount.
 
@@ -327,6 +328,9 @@ class ProjectAccess(db.Model):
     company_id = db.Column(db.Integer, db.ForeignKey("company.id"), nullable=True, index=True)
     allow_overview = db.Column(db.Boolean, nullable=False, default=False)
     allow_media = db.Column(db.Boolean, nullable=False, default=False)
+    # Which viewer tabs a client share shows: Flight Scans map, Media (allow_media) and Site walkthrough.
+    allow_flight_scans = db.Column(db.Boolean, nullable=False, default=True)
+    allow_walkthrough = db.Column(db.Boolean, nullable=False, default=True)
     allow_documents = db.Column(db.Boolean, nullable=False, default=False)
     client_emails = db.Column(db.Text, nullable=False, default="")
     access_keyword = db.Column(db.String(80), nullable=False, default="")
@@ -2092,6 +2096,7 @@ def migrate_sqlite():
         apply_site_boundary_migration()
         apply_site_boundary_name_migration()
         apply_site_image_bounds_migration()
+        apply_share_tabs_migration()
         apply_project_code_email_migration()
         apply_share_keyword_migration()
         apply_email_optout_migration()
@@ -2125,6 +2130,7 @@ def migrate_sqlite():
         },
         "project_access": {"company_id": "INTEGER", "allow_overview": bool_false,
                            "allow_media": bool_false, "allow_documents": bool_false,
+                           "allow_flight_scans": bool_true, "allow_walkthrough": bool_true,
                            "client_emails": "TEXT NOT NULL DEFAULT ''",
                            "access_keyword": "VARCHAR(80) NOT NULL DEFAULT ''",
                            "access_mode": "VARCHAR(10) NOT NULL DEFAULT 'email'",
@@ -2208,6 +2214,7 @@ def migrate_sqlite():
     apply_site_boundary_migration()
     apply_site_boundary_name_migration()
     apply_site_image_bounds_migration()
+    apply_share_tabs_migration()
     apply_project_code_email_migration()
     apply_share_keyword_migration()
     apply_email_optout_migration()
@@ -2477,6 +2484,26 @@ def apply_site_image_bounds_migration():
     db.session.commit()
 
 
+def apply_share_tabs_migration():
+    """Let admins pick which viewer tabs each client share shows. Existing shares
+    keep what they showed before: all three tabs followed allow_media."""
+    tables = set(inspect(db.engine).get_table_names())
+    if "project_access" in tables:
+        columns = {column["name"] for column in inspect(db.engine).get_columns("project_access")}
+        for name in ("allow_flight_scans", "allow_walkthrough"):
+            if name not in columns:
+                db.session.execute(text(
+                    f'ALTER TABLE "project_access" ADD COLUMN "{name}" {migration_boolean_column(default=True)}'
+                ))
+        if not db.session.get(SchemaMigration, SHARE_TABS_SCHEMA_REVISION):
+            db.session.execute(text(
+                'UPDATE "project_access" SET "allow_flight_scans" = "allow_media", "allow_walkthrough" = "allow_media"'
+            ))
+    if not db.session.get(SchemaMigration, SHARE_TABS_SCHEMA_REVISION):
+        db.session.add(SchemaMigration(revision=SHARE_TABS_SCHEMA_REVISION))
+    db.session.commit()
+
+
 def apply_share_keyword_migration():
     """Add the custom share keyword column and the one-time-code table for
     email-restricted project shares."""
@@ -2680,7 +2707,7 @@ def shared_project(token):
     if not viewer_access_active(access):
         abort(404)
     drone_viewer = company_feature_enabled("flight_scans", access.company_id)
-    walkthrough_viewer = bool(access.allow_media and company_service_enabled("walkthrough", access.company_id))
+    walkthrough_viewer = bool(access.allow_walkthrough and company_service_enabled("walkthrough", access.company_id))
     if not drone_viewer and not walkthrough_viewer:
         abort(404)
     already_in = (session.get("viewer_token") == access.share_token
@@ -2913,23 +2940,30 @@ def render_project_view(access):
     selected_id = request.args.get("flight", type=int)
     selected_flight = next((f for f in day_flights if f.id == selected_id), None) or (day_flights[0] if day_flights else None)
     tab = request.args.get("tab", "map")
-    # Client access gates each view. The Flight Scans map and the Media grid both
-    # surface footage, so both require allow_media; Overview/timeline require
+    # Client access gates each view. The admin picks the tabs per share: Flight Scans
+    # (allow_flight_scans), Media (allow_media), Site walkthrough (allow_walkthrough); Overview/timeline require
     # allow_overview; Documents require allow_documents and the documents feature.
     # It never grants account, billing, or editing access.
     permissions = set()
-    if access.allow_media:
-        permissions.update({"map", "media"})
+    drone_viewer = company_feature_enabled("flight_scans", access.company_id)
+    walkthrough_viewer = bool(access.allow_walkthrough and company_service_enabled("walkthrough", access.company_id))
+    if access.allow_flight_scans and drone_viewer:
+        permissions.add("map")
+    if access.allow_media and drone_viewer:
+        permissions.add("media")
     if access.allow_overview:
         permissions.update({"overview", "timeline"})
     if access.allow_documents and company_feature_enabled("documents", access.company_id):
         permissions.add("documents")
+    walkthrough_link = url_for("walkthrough.shared", token=token) if walkthrough_viewer else ""
     if tab not in permissions:
         if not permissions:
+            if walkthrough_link:
+                return redirect(walkthrough_link)
             abort(403)
         return redirect(url_for("shared_project", token=token,
                                 tab=("map" if "map" in permissions else sorted(permissions)[0])))
-    return render_template("project_view.html", project=access.project, code=access.code, share_token=token,
+    return render_template("project_view.html", project=access.project, code=access.access_keyword or access.code, share_token=token,
                            flights=flights, day_flights=day_flights, dates=dates, docs=docs,
                            media_areas=sorted({f.area for f in flights if f.area}),
                            selected_date=selected_date, selected_flight=selected_flight, tab=tab,
@@ -2943,8 +2977,7 @@ def render_project_view(access):
                            compare_date=compare_date,
                            google_maps_api_key=app.config.get("GOOGLE_MAPS_API_KEY", ""),
                            map_default_center=request_geo_center(),
-                           walkthrough_url=url_for("walkthrough.shared", token=token)
-                               if access.allow_media and company_service_enabled("walkthrough", access.company_id) else "")
+                           walkthrough_url=walkthrough_link)
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -5114,7 +5147,27 @@ def create_project_access():
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(back)
+    # Tabs the client sees. Older forms without the checkboxes show every tab.
+    if request.form.get("tabs_form"):
+        tabs = {name: request.form.get(name) == "on"
+                for name in ("allow_flight_scans", "allow_media", "allow_walkthrough")}
+        if not any(tabs.values()):
+            flash("Choose at least one tab for the client to see.", "error")
+            return redirect(back)
+    else:
+        tabs = {"allow_flight_scans": True, "allow_media": True, "allow_walkthrough": True}
     access = ProjectAccess.query.filter_by(project=project).first()
+    tabs_changed = bool(access) and any(bool(getattr(access, name)) != value for name, value in tabs.items())
+    if (tabs_changed and viewer_access_active(access) and access.access_keyword == code_value
+            and set(share_allow_list(access)) == {r.strip().lower() for r in recipients}
+            and (not expiration_date or (access.expires_at and access.expires_at.date() == expiration_date))):
+        # Same code, emails and expiry: only the tab choices changed, so keep the link working.
+        for name, value in tabs.items():
+            setattr(access, name, value)
+        db.session.commit()
+        audit("project_access_tabs", "project", project, "Updated the tabs a client share shows")
+        flash(f"Client tabs updated for {project}. The link and code stay the same.", "success")
+        return redirect(back)
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ"
     for _ in range(100):
         code = "".join(secrets.choice(alphabet) for _ in range(4))
@@ -5136,7 +5189,8 @@ def create_project_access():
     access.expires_at = datetime.combine(expiration_date, datetime.max.time()) if expiration_date else None
     access.revoked_at = None
     access.allow_overview = False
-    access.allow_media = True
+    for name, value in tabs.items():
+        setattr(access, name, value)
     access.allow_documents = False
     access.access_mode = "code"
     access.code_attempts = 0
@@ -5183,6 +5237,8 @@ def rotate_project_access_codes():
         ProjectAccess.revoked_at.is_(None),
         or_(ProjectAccess.expires_at.is_(None), ProjectAccess.expires_at > now),
         ProjectAccess.client_emails != "",
+        # Clients sign in with the admin-set code; only legacy shares without one rotate weekly.
+        ProjectAccess.access_keyword == "",
         or_(ProjectAccess.last_code_email_at.is_(None), ProjectAccess.last_code_email_at <= cutoff),
     ).all()
     sent = skipped = 0
