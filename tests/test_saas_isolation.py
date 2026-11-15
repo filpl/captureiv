@@ -74,7 +74,8 @@ class TenantIsolationTests(unittest.TestCase):
                 portal.Flight(company_id=company_a.id, flight_id="A-FLIGHT", date=date(2026, 10, 19), direction="W-E", title="Tenant A flight", filename="a.mp4", original_filename="a.mp4", uploaded_by=user_a.id, project="A project"),
                 portal.Flight(company_id=company_b.id, flight_id="B-FLIGHT", date=date(2026, 10, 19), direction="W-E", title="Tenant B flight", filename="b.mp4", original_filename="b.mp4", uploaded_by=user_b.id, project="B project"),
                 portal.Flight(company_id=company_a.id, flight_id="A-SECRET", date=date(2026, 10, 19), direction="W-E", title="Unassigned A project", filename="a-secret.mp4", original_filename="a-secret.mp4", uploaded_by=user_a.id, project="Unassigned project"),
-                portal.ProjectAccess(company_id=company_b.id, project="B project", code="BBBB", allow_media=False),
+                portal.ProjectAccess(company_id=company_b.id, project="B project", code="BBBB", allow_media=False,
+                                     allow_flight_scans=False, allow_walkthrough=False),
                 portal.ProjectFile(company_id=company_b.id, date=date(2026, 10, 19), name="Private doc", filename="private.pdf", uploaded_by=user_b.id, project="B project", file_size=12),
                 portal.ProjectAssignment(company_id=company_a.id, user_id=employee.id, project="A project"),
                 portal.SubscriptionPlan(name="Basic", description="Core plan", active=True, custom_pricing=False),
@@ -481,6 +482,37 @@ class TenantIsolationTests(unittest.TestCase):
         self.assertEqual(login.status_code, 302)
         visible_flights = employee_client.get("/api/flights").get_json()["flights"]
         self.assertEqual({row["project"] for row in visible_flights}, {"A project"})
+
+    def test_admin_picks_viewer_tabs_without_breaking_the_link(self):
+        admin = portal.app.test_client()
+        with admin.session_transaction() as s:
+            s["_user_id"] = str(self.user_a_id); s["_fresh"] = True; s["_csrf"] = "t"
+        base = {"_csrf": "t", "project": "A project", "access_keyword": "TabsCode", "tabs_form": "1"}
+        admin.post("/admin/projects/access", data={**base, "allow_flight_scans": "on", "allow_media": "on",
+                                                   "allow_walkthrough": "on"})
+        with portal.app.app_context():
+            access = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).one()
+            token = access.share_token
+        # Only the tabs change: same link, Media hidden from the client.
+        resp = admin.post("/admin/projects/access", data={**base, "allow_flight_scans": "on"})
+        self.assertEqual(resp.status_code, 302)
+        with portal.app.app_context():
+            access = portal.ProjectAccess.query.filter_by(project="A project", company_id=1).one()
+            self.assertEqual(access.share_token, token)
+            self.assertEqual((access.allow_flight_scans, access.allow_media, access.allow_walkthrough), (True, False, False))
+        viewer = portal.app.test_client()
+        with viewer.session_transaction() as s:
+            s["_csrf"] = "t"
+        viewer.post(f"/share/{token}", data={"_csrf": "t", "code": "tabscode", "next_tab": "map"})
+        page = viewer.get(f"/share/{token}?tab=map")
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn(b">Media</a>", page.data)
+        self.assertIn(b"A project", page.data)
+        self.assertEqual(viewer.get(f"/share/{token}?tab=media").status_code, 302)
+        # No tabs ticked is refused.
+        admin.post("/admin/projects/access", data=base)
+        with portal.app.app_context():
+            self.assertTrue(portal.ProjectAccess.query.filter_by(project="A project", company_id=1).one().allow_flight_scans)
 
     def test_viewer_tabs_default_to_flight_scans(self):
         client = portal.app.test_client()

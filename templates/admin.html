@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Admin{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='admin-console.css') }}?v=2">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='admin-console.css') }}?v=3">{% endblock %}
 {% block content %}
 {% set client_sees = [] %}
 {% if features.flight_scans %}{% set _ = client_sees.append('drone footage') %}{% endif %}
@@ -50,7 +50,7 @@
           <div class="access-name"><strong>{{ project_name }}</strong>
             <span>{% if access and access.revoked_at %}Access revoked{% elif access and access.expires_at and access.expires_at <= current_time %}Link expired{% elif access and access.expires_at %}Active · expires {{ access.expires_at.strftime('%b %d, %Y') }}{% elif access %}Active viewer link{% else %}Not shared yet{% endif %}</span></div>
           {% if live %}
-          <code class="code-chip access-code-label" aria-label="Client code">{{ access.code }}</code>
+          <code class="code-chip access-code-label" aria-label="Client access code" title="The code clients enter">{{ access.access_keyword or access.code }}</code>
           <a class="button secondary small" target="_blank" rel="noopener" href="{{ url_for('shared_project',token=access.share_token) }}">Open viewer ↗</a>
           <button class="button secondary small copy-link" type="button" data-link="{{ url_for('shared_project',token=access.share_token,_external=True) }}">Copy link</button>
           {% endif %}
@@ -62,6 +62,10 @@
               <label class="viewer-expiry">Allowed emails for Google<input type="text" name="client_emails" autocomplete="off" value="{{ access.client_emails if access else '' }}" placeholder="client@example.com, another@example.com"><span class="field-hint">These addresses can also “Continue with Google.” Blank = code only.</span></label>
               <label class="viewer-expiry">Link expires<input type="date" name="expires_on" value="{{ access.expires_at.strftime('%Y-%m-%d') if access and access.expires_at else '' }}"></label>
             </div>
+            <fieldset class="share-tab-choices"><legend>Tabs this client sees</legend><input type="hidden" name="tabs_form" value="1">
+              {% for field, label, hint in [('allow_flight_scans','Flight Scans','Site map, drone routes and flight videos'),('allow_media','Media','All project videos and photos'),('allow_walkthrough','Site walkthrough','360° walkthrough captures')] %}<label class="share-tab-choice"><input type="checkbox" name="{{ field }}" value="on" {% if not access or access[field] %}checked{% endif %}><span><strong>{{ label }}</strong><small>{{ hint }}</small></span></label>{% endfor %}
+              <span class="field-hint">Changing only the tabs keeps the same link and code.</span>
+            </fieldset>
             <div class="form-actions">
               <button class="button {% if access and not access.revoked_at %}secondary{% else %}primary{% endif %} small">{% if access and not access.revoked_at %}Save / renew code{% else %}Create access code{% endif %}</button>
               <span class="field-hint">Renewing issues a new code and link; the old ones stop working.</span>

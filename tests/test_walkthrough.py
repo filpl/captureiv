@@ -50,7 +50,7 @@ class WalkthroughTests(unittest.TestCase):
                 portal.CompanyMembership(company_id=other.id, user_id=users["other"].id, role="company_admin", status="active"),
                 portal.ProjectAssignment(company_id=walk.id, user_id=users["employee"].id, project="Tower A"),
                 portal.ProjectAccess(company_id=walk.id, project="Tower A", code="WKTA", allow_media=True),
-                portal.ProjectAccess(company_id=walk.id, project="Tower B", code="WKTB", allow_media=False),
+                portal.ProjectAccess(company_id=walk.id, project="Tower B", code="WKTB", allow_media=False, allow_walkthrough=False),
             ])
             portal.db.session.commit()
             cls.ids = {key: user.id for key, user in users.items()}
