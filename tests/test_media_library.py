@@ -471,6 +471,8 @@ class MediaLibraryTests(unittest.TestCase):
             for path in ("/media/", "/login", "/dashboard", "/admin", f"/media/file/{video_id}", "/owner"):
                 self.assertEqual(viewer.get(path, base_url="https://view.example.test").status_code, 404, path)
             self.assertEqual(viewer.get("/", base_url="https://view.example.test").status_code, 302)
+            # The hosting health check still answers on the viewer host.
+            self.assertEqual(viewer.get("/api/health", base_url="https://view.example.test").status_code, 200)
             # A signed-in platform session is never honoured on the viewer host.
             signed_in = self.client_for("admin")
             self.assertEqual(signed_in.get(f"/media/file/{video_id}", base_url="https://view.example.test").status_code, 404)

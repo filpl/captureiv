@@ -177,7 +177,8 @@ def create_media_library_blueprint(core):
             return None
         endpoint = request.endpoint or ""
         if on_viewer_host():
-            if endpoint in PUBLIC_ENDPOINTS:
+            # The hosting platform's health check may arrive on any custom domain.
+            if endpoint in PUBLIC_ENDPOINTS or endpoint == "api_health":
                 return None
             if endpoint == "static":
                 filename = (request.view_args or {}).get("filename", "")
