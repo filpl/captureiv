@@ -1447,6 +1447,47 @@ class TenantIsolationTests(unittest.TestCase):
             state["_csrf"] = "t"
         self.assertEqual(other.post("/verify-code", data={"_csrf": "t", "code": code}).status_code, 400)
 
+    def test_signup_code_screen_goes_straight_to_stripe_with_renewal_consent(self):
+        client = portal.app.test_client()
+        page = client.get("/register?plan=basic")
+        csrf = re.search(rb'name="_csrf" value="([^"]+)"', page.data).group(1).decode()
+        with portal.app.app_context():
+            plan = portal.SubscriptionPlan.query.filter_by(name="Basic").first()
+            plan_id, old_price = plan.id, plan.stripe_monthly_price_id
+            plan.stripe_monthly_price_id = "price_live_signup_fixture"; portal.db.session.commit()
+        self.addCleanup(self._restore_monthly_price, plan_id, old_price)
+        data = {"_csrf": csrf, "company_name": "Fast Co", "email": "fast@example.test",
+                "password": "test-password-123", "confirm_password": "test-password-123",
+                "plan_id": str(plan_id), "billing_interval": "monthly", "accept_policies": "yes"}
+        stripe_response = MagicMock()
+        stripe_response.__enter__.return_value.read.return_value = json.dumps(
+            {"url": "https://checkout.stripe.test/signup-fixture"}).encode()
+        with patch.dict(portal.app.config, {"APP_ENV": "production", "PUBLIC_APP_URL": "https://platform.example.test"}), \
+                patch.dict(portal.os.environ, {"STRIPE_SECRET_KEY": "sk_live_local-fixture"}), \
+                patch.object(portal, "send_account_email", return_value=True) as send_mail, \
+                patch.object(portal, "urlopen", return_value=stripe_response) as stripe_api:
+            screen = client.post("/register", data=data)
+            self.assertIn(b'name="accept_billing_terms"', screen.data)
+            self.assertIn(b"Automatic renewal:", screen.data)
+            code = re.search(r"code is: (\d{6})", send_mail.call_args.args[2]).group(1)
+            step = client.post("/verify-code", data={"_csrf": csrf, "code": code, "accept_billing_terms": "yes"})
+            self.assertEqual(step.status_code, 307)
+            paid = client.post(step.headers["Location"], data={"_csrf": csrf, "code": code, "accept_billing_terms": "yes"})
+        self.assertEqual(paid.status_code, 303)
+        self.assertEqual(paid.location, "https://checkout.stripe.test/signup-fixture")
+        self.assertTrue(stripe_api.called)
+        with portal.app.app_context():
+            user = portal.User.query.filter_by(email="fast@example.test").one()
+            self.assertTrue(user.email_verified)
+            self.assertFalse(user.active)
+            consent = portal.AuditLog.query.filter_by(user_id=user.id, action="billing_terms_accepted").one()
+            self.assertTrue(json.loads(consent.detail)["automatic_renewal"])
+
+    def _restore_monthly_price(self, plan_id, price):
+        with portal.app.app_context():
+            portal.db.session.get(portal.SubscriptionPlan, plan_id).stripe_monthly_price_id = price
+            portal.db.session.commit()
+
     def test_signup_code_locks_after_five_wrong_tries(self):
         client = portal.app.test_client()
         page = client.get("/register?plan=basic")

@@ -2878,8 +2878,10 @@ def verification_email_body(display_name, code, verify_url):
             "Your account will remain pending until subscription billing is confirmed.")
 
 
-def complete_email_verification(user):
-    """Mark the email verified and return the checkout redirect for the pending subscription."""
+def complete_email_verification(user, straight_to_payment=False):
+    """Mark the email verified and return the checkout redirect for the pending subscription.
+    With straight_to_payment (the renewal terms were accepted on the code screen), the browser
+    re-posts the acceptance to checkout, which records consent and opens Stripe."""
     user.email_verified = True
     EmailActionToken.query.filter(EmailActionToken.user_id == user.id, EmailActionToken.used_at.is_(None),
                                   EmailActionToken.purpose.in_(["verify_email", "verify_code"])).update(
@@ -2892,6 +2894,11 @@ def complete_email_verification(user):
                             .order_by(CompanySubscription.id.desc()).first() if membership else None)
     session["pending_checkout_subscription_id"] = pending_subscription.id if pending_subscription else None
     session.pop("verify_user_id", None)
+    if straight_to_payment and pending_subscription:
+        terms = subscription_checkout_terms(pending_subscription)
+        if terms["checkout_ready"]:
+            session["billing_review"] = terms["agreement"]
+            return redirect(url_for("subscription_checkout", subscription_id=pending_subscription.id), code=307)
     flash("Email verified. Continue to secure checkout; access starts only after billing confirmation.", "success")
     return (redirect(url_for("subscription_checkout", subscription_id=session["pending_checkout_subscription_id"]))
             if session["pending_checkout_subscription_id"] else redirect(url_for("login")))
@@ -2912,7 +2919,8 @@ def verify_code():
                   .order_by(EmailActionToken.id.desc()).first())
         if (failures < VERIFY_CODE_MAX_FAILURES and action and action.expires_at >= now_utc() and len(code) == 6
                 and secrets.compare_digest(action.token_hash, verify_code_hash(user.id, code))):
-            return complete_email_verification(user)
+            return complete_email_verification(
+                user, straight_to_payment=request.form.get("accept_billing_terms") == "yes")
         db.session.add(RateLimitEvent(route="verify-code-user", subject_hash=failures_key))
         if failures + 1 >= VERIFY_CODE_MAX_FAILURES and action:
             action.used_at = now_utc()
@@ -2925,8 +2933,10 @@ def verify_code():
     else:
         message = "That code is incorrect. Check the latest email and try again."
     flash(message, "error")
+    sub = pending_signup_subscription(user) if user else None
     return render_template("registration_pending.html", email=email or (user.email if user else ""),
-                           plan=None, local_verify_url="", email_sent=True), 400
+                           plan=None, local_verify_url="", email_sent=True,
+                           billing=signup_billing_notice(sub.plan, sub.billing_interval) if sub else None), 400
 
 
 @app.post("/verify-code/resend")
@@ -2943,8 +2953,10 @@ def resend_verify_code():
             app.logger.exception("Verification code resend failed")
         email = user.email
     flash("A new code has been sent. It replaces the previous code.", "success")
+    sub = pending_signup_subscription(user) if user else None
     return render_template("registration_pending.html", email=email, plan=None,
-                           local_verify_url="", email_sent=True)
+                           local_verify_url="", email_sent=True,
+                           billing=signup_billing_notice(sub.plan, sub.billing_interval) if sub else None)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -2993,7 +3005,8 @@ def register():
                     app.logger.exception("Duplicate-registration notice delivery failed")
                 session.pop("verify_user_id", None)
                 return render_template("registration_pending.html", email=email, plan=plan,
-                                       local_verify_url="", email_sent=True), 201
+                                       local_verify_url="", email_sent=True,
+                                       billing=signup_billing_notice(plan, request.form.get("billing_interval", "monthly"))), 201
             # Registration starts pending. Email verification alone never grants paid access.
             company = Company(name=company_name, status="pending", storage_limit_bytes=plan.storage_limit_bytes)
             display_name = " ".join(part for part in (first, last) if part).strip() or email.split("@", 1)[0]
@@ -3020,7 +3033,8 @@ def register():
                         app.logger.exception("Duplicate-registration notice delivery failed")
                 session.pop("verify_user_id", None)
                 return render_template("registration_pending.html", email=email, plan=plan,
-                                       local_verify_url="", email_sent=True), 201
+                                       local_verify_url="", email_sent=True,
+                                       billing=signup_billing_notice(plan, request.form.get("billing_interval", "monthly"))), 201
             membership = CompanyMembership(company_id=company.id, user_id=user.id, role="company_admin", status="pending")
             subscription = CompanySubscription(company_id=company.id, plan_id=plan.id, status="pending", billing_interval=request.form.get("billing_interval", "monthly"))
             db.session.add_all([membership, subscription])
@@ -3041,7 +3055,8 @@ def register():
             audit("registration_pending", "company", company.id, f"New registration for {company_name}")
             return render_template("registration_pending.html", email=email, plan=plan,
                                    local_verify_url=verify_url if os.environ.get("APP_ENV", "development") != "production" and not delivered else "",
-                                   email_sent=delivered), 201
+                                   email_sent=delivered,
+                                   billing=signup_billing_notice(plan, request.form.get("billing_interval", "monthly"))), 201
         return render_template("register.html", plans=plans, requested_plan=requested_plan, pending_checkout=pending_checkout), 400
     return render_template("register.html", plans=plans, requested_plan=requested_plan, pending_checkout=pending_checkout)
 
@@ -3138,6 +3153,43 @@ def reset_password_with_token(token):
     return render_template("reset_password.html")
 
 
+def subscription_checkout_terms(subscription):
+    """Price, renewal terms and the recurring-billing agreement shown before payment."""
+    plan = subscription.plan
+    stripe_key = os.environ.get("STRIPE_SECRET_KEY", "")
+    price_id = subscription.stripe_price_id_override or (
+        (plan.stripe_annual_price_id if subscription.billing_interval == "annual" else plan.stripe_monthly_price_id)
+        if plan else "")
+    amount_cents = (subscription.custom_amount_cents if plan and plan.custom_pricing else
+                    (plan.annual_amount_cents if subscription.billing_interval == "annual"
+                     else plan.monthly_amount_cents) if plan else None)
+    renewal_interval = "year" if subscription.billing_interval == "annual" else "month"
+    agreement = {"version": BILLING_TERMS_VERSION, "subscription_id": subscription.id,
+        "company_id": subscription.company_id, "price_id": price_id,
+        "amount_cents": amount_cents, "currency": "usd", "interval": renewal_interval,
+        "automatic_renewal": True, "cancellation": "end_of_paid_period", "retrieval_days": 90}
+    return {"stripe_key": stripe_key, "price_id": price_id,
+            "checkout_ready": stripe_api_key_is_valid(stripe_key) and bool(price_id),
+            "amount_cents": amount_cents, "renewal_interval": renewal_interval, "agreement": agreement}
+
+
+def signup_billing_notice(plan, interval):
+    """Renewal disclosure for the sign-up code screen (same for new and duplicate sign-ups)."""
+    if not plan:
+        return None
+    annual = interval == "annual"
+    price_id = plan.stripe_annual_price_id if annual else plan.stripe_monthly_price_id
+    return {"amount_cents": plan.annual_amount_cents if annual else plan.monthly_amount_cents,
+            "interval": "year" if annual else "month",
+            "ready": stripe_api_key_is_valid(os.environ.get("STRIPE_SECRET_KEY", "")) and bool(price_id)}
+
+
+def pending_signup_subscription(user):
+    membership = CompanyMembership.query.filter_by(user_id=user.id, role="company_admin").first() if user else None
+    return (CompanySubscription.query.filter_by(company_id=membership.company_id)
+            .order_by(CompanySubscription.id.desc()).first() if membership else None)
+
+
 @app.route("/account/checkout/<int:subscription_id>", methods=["GET", "POST"])
 def subscription_checkout(subscription_id):
     subscription = db.get_or_404(CompanySubscription, subscription_id)
@@ -3157,19 +3209,9 @@ def subscription_checkout(subscription_id):
                           and (not plan.annual_amount_cents or not plan.stripe_annual_price_id)))):
         flash("Annual billing is not available until its price is approved and configured.", "error")
         return redirect(url_for("register"))
-    stripe_key = os.environ.get("STRIPE_SECRET_KEY", "")
-    price_id = subscription.stripe_price_id_override or (
-        (plan.stripe_annual_price_id if subscription.billing_interval == "annual" else plan.stripe_monthly_price_id)
-        if plan else "")
-    checkout_ready = stripe_api_key_is_valid(stripe_key) and bool(price_id)
-    amount_cents = (subscription.custom_amount_cents if plan and plan.custom_pricing else
-                    (plan.annual_amount_cents if subscription.billing_interval == "annual"
-                     else plan.monthly_amount_cents) if plan else None)
-    renewal_interval = "year" if subscription.billing_interval == "annual" else "month"
-    agreement = {"version": BILLING_TERMS_VERSION, "subscription_id": subscription.id,
-        "company_id": subscription.company_id, "price_id": price_id,
-        "amount_cents": amount_cents, "currency": "usd", "interval": renewal_interval,
-        "automatic_renewal": True, "cancellation": "end_of_paid_period", "retrieval_days": 90}
+    terms = subscription_checkout_terms(subscription)
+    stripe_key, price_id, checkout_ready = terms["stripe_key"], terms["price_id"], terms["checkout_ready"]
+    amount_cents, renewal_interval, agreement = terms["amount_cents"], terms["renewal_interval"], terms["agreement"]
     if request.method == "GET":
         session["billing_review"] = agreement
         if not stripe_api_key_is_valid(stripe_key):
