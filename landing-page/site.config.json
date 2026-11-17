@@ -1,5 +1,6 @@
 {
   "platformLoginUrl": "https://app.captureiv.com/login",
   "platformSignupUrl": "https://app.captureiv.com/register",
-  "platformEnterpriseUrl": "https://app.captureiv.com/enterprise/request"
+  "platformEnterpriseUrl": "https://app.captureiv.com/enterprise/request",
+  "platformLegalUrl": "https://app.captureiv.com/legal"
 }

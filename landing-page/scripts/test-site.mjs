@@ -10,6 +10,11 @@ for(const route of ['/','/platform','/solutions','/clients','/about','/contact',
  assert.match(html,/support@captureiv.com/);assert.doesNotMatch(html,/Illustrative photography:/);
  for(const link of html.matchAll(/href="(\/[^"]*)"/g)){
   const target=await site.fetch(new Request(new URL(link[1],'https://construct.test')),{});
+  if(/^\/(terms|privacy|cookies|accessibility|billing|refunds|copyright)$/.test(link[1])){
+   assert.equal(target.status,302,'Legal link should redirect '+link[1]);
+   assert.match(target.headers.get('Location'),new RegExp('/legal'+link[1].replace('/','\\/')+'$'),'Legal redirect target '+link[1]);
+   continue;
+  }
   assert.equal(target.status,200,'Broken internal link '+link[1]);
  }
 }
@@ -31,3 +36,12 @@ assert.equal((await contact(req(),{DB:broken})).status,503);
 console.log('Eight routes and internal links pass. Contact validation, origin checks, persistence calls, rate limiting and storage failures pass.');
 
 const portal=await site.fetch(new Request('https://construct.test/portal'),{});assert.equal(portal.status,302);assert.ok(portal.headers.get('Location'));console.log('Legacy /portal redirects directly to the configured platform login.');
+for(const slug of ['terms','privacy','cookies','billing','refunds','copyright','accessibility']){
+ for(const path of ['/'+slug,'/'+slug+'/','/legal/'+slug]){
+  const response=await site.fetch(new Request('https://construct.test'+path),{});
+  assert.equal(response.status,302,path);assert.match(response.headers.get('Location'),new RegExp('/legal/'+slug+'$'),path);
+ }
+}
+assert.match((await site.fetch(new Request('https://construct.test/legal'),{})).headers.get('Location'),/\/legal$/);
+assert.equal((await site.fetch(new Request('https://construct.test/legal/unknown'),{})).status,404);
+console.log('Legal paths redirect to the platform policies.');

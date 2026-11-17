@@ -311,3 +311,4 @@ html{scroll-padding-top:88px}body{background:var(--paper);color:var(--ink);backg
 .platform-map-canvas .platform-date-pin,.platform-map-canvas .platform-photo-pin{z-index:4}
 .platform-map-canvas .platform-demo-cursor{z-index:5}
 @media(max-width:600px){.platform-map-controls{top:9px;right:9px}}
+.footer-legal{display:flex;gap:16px;flex-wrap:wrap}.footer-legal a{color:inherit;text-decoration:underline;text-underline-offset:2px}.footer-legal a:hover{color:#56e3d0}.consent-copy a{color:inherit;text-decoration:underline}
